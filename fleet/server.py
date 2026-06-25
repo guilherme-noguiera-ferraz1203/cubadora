@@ -321,7 +321,11 @@ def _make_handler(db: FleetDB):
                             "comandos": db.list_commands(did, 15)} if dev else {"erro": "não encontrado"},
                            200 if dev else 404)
             elif p.startswith("/api/versions"):
-                self._json({"alvo": db.get_config("versao_alvo"), "disponiveis": versoes_disponiveis()})
+                disp = versoes_disponiveis()
+                alvo = db.get_config("versao_alvo")
+                if alvo and alvo not in disp:
+                    alvo = ""
+                self._json({"alvo": alvo, "disponiveis": disp})
             elif p.startswith("/api/package/"):
                 versao = p.rsplit("/", 1)[-1]
                 caminho = os.path.join(_PKG_DIR, versao + ".zip")
@@ -359,7 +363,11 @@ def _make_handler(db: FleetDB):
                             db.ack_command(r["id"], r.get("status", "executado"), str(r.get("resultado", "")))
                     # Entrega os comandos pendentes deste equipamento (entrega única)
                     comandos = db.pull_commands(did) if did else []
-                    self._json({"versao_alvo": db.get_config("versao_alvo"), "comandos": comandos})
+                    # Trava: só manda atualizar para uma versão que TEM pacote (nunca lixo/placeholder).
+                    alvo = db.get_config("versao_alvo")
+                    if alvo and alvo not in versoes_disponiveis():
+                        alvo = ""
+                    self._json({"versao_alvo": alvo, "comandos": comandos})
                 except Exception as exc:  # noqa: BLE001
                     self._json({"erro": str(exc)}, 500)
             elif p.startswith("/api/command"):
