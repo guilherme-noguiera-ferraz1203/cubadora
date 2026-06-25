@@ -441,7 +441,10 @@ def _make_handler(db: FleetDB):
         def _tunnel_proxy(self, db):
             """Reverse proxy /device/<id>/<path>  ->  http://cubadora-sshd:<tunnel_port>/<path>.
             A request ja chega autenticada pelo nginx central (auth_basic do painel).
-            O Pi precisa estar com autossh ativo para a porta tunelada estar de pe."""
+            O Pi precisa estar com autossh ativo para a porta tunelada estar de pe.
+
+            Reescreve URLs absolutas no HTML/JS/CSS para incluir o prefixo /device/<id>/ —
+            necessario porque o frontend do equipamento usa fetch('/api/...') (absoluto)."""
             parts = self.path.split("/", 3)   # ['', 'device', '<id>', '<resto>?qs']
             if len(parts) < 3:
                 self._json({"erro": "rota invalida"}, 400); return
@@ -451,14 +454,28 @@ def _make_handler(db: FleetDB):
             if not dev or not dev.get("tunnel_port"):
                 self._send(404, b"<h3>Tunel deste equipamento nao configurado.</h3>", "text/html; charset=utf-8"); return
             url = f"http://{_TUNNEL_BACKEND_HOST}:{dev['tunnel_port']}{resto}"
-            # encaminha headers e body
             data = self._read() if self.command in ("POST", "PUT", "PATCH") else None
             headers = {k: v for k, v in self.headers.items()
                        if k.lower() not in ("host", "content-length", "authorization", "connection")}
+            prefix = f"/device/{did}"
             try:
                 req = urllib.request.Request(url, data=data, headers=headers, method=self.command)
                 with urllib.request.urlopen(req, timeout=20) as resp:
                     body = resp.read()
+                    ctype = resp.headers.get("Content-Type", "") or ""
+                    # Reescreve paths absolutos so em HTML/JS/CSS (nao em binarios/JSON)
+                    if any(t in ctype for t in ("text/html", "javascript", "text/css")):
+                        try:
+                            txt = body.decode("utf-8")
+                            for pat in ('"/api/', "'/api/", '"/logo', "'/logo",
+                                        'href="/', "href='/", 'src="/', "src='/", 'action="/', "action='/"):
+                                txt = txt.replace(pat, pat[0] + prefix + pat[1:])
+                            # nao prefixar URLs absolutas (http*)
+                            for bad in (prefix + '/http', prefix + '/https'):
+                                txt = txt.replace(bad, '/' + bad[len(prefix)+1:])
+                            body = txt.encode("utf-8")
+                        except UnicodeDecodeError:
+                            pass
                     self.send_response(resp.status)
                     for h, v in resp.headers.items():
                         if h.lower() in ("transfer-encoding", "connection", "content-length"): continue
