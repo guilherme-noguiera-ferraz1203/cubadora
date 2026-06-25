@@ -1,48 +1,75 @@
-# cubagem-pi (Python)
+# Cubadora — sistema de cubagem + painel de frota
 
-Reescrita em **Python para Raspberry Pi** do sistema de cubagem Compudeck (originalmente Java).
-Mede **altura, largura, comprimento e peso** de volumes e integra com ERP/nuvem.
+Reescrita em **Python** do sistema de cubagem Compudeck. Dois componentes:
 
-> Especificação técnica completa (engenharia reversa do sistema Java): ver
-> [`../ANALISE-TECNICA.md`](../ANALISE-TECNICA.md). Lista de tarefas: [`TODO.md`](TODO.md).
+1. **Equipamento** (roda em cada Raspberry Pi): mede altura/largura/comprimento/peso, tela do
+   operador (kiosk), calibração, integração com ERP. Pacote `cubagempi/`.
+2. **Painel de frota** (roda numa VPS central): gerencia **todas** as máquinas — versão, unidade,
+   status, histórico de erros — e distribui atualizações. Pacote `fleet/`.
 
-## Escopo (definido com o cliente)
-- **Modelos:** estática (ultrassônico), câmera, e dinâmica/CLP (esteira) — escopo completo.
-- **Hardware:** o mesmo do sistema atual (sensores com protocolo proprietário de 5 bytes,
-  balança via ponte ATmega/I²C, Modbus RTU para CLP/balança dinâmica).
-- **Interface:** GUI local (operador) + painel web (admin/suporte).
-- **Integrações:** ERP (Vestra/ESL via REST) + nuvem Compudeck.
+---
 
-## Arquitetura (camadas)
+## 🚀 Deploy do PAINEL DE FROTA na VPS (Docker + NGINX)
+
+> **Para um agente/operador na VPS:** o objetivo é publicar o painel de frota em
+> **https://cubadora.specialcore.com.br** usando o NGINX já existente. Siga o tutorial completo,
+> passo a passo e com saídas esperadas, em **[`deploy/AGENTE-DEPLOY.md`](deploy/AGENTE-DEPLOY.md)**.
+
+Resumo (detalhes e segurança no tutorial):
+```bash
+# 1) clonar e subir o container (porta exposta só em 127.0.0.1:9000)
+git clone <ESTE_REPO> /opt/cubagem-fleet && cd /opt/cubagem-fleet
+docker compose up -d --build
+curl -s http://127.0.0.1:9000/api/versions          # deve responder JSON
+
+# 2) NGINX: site novo para o domínio (não toca nos outros sites)
+sudo cp deploy/nginx-cubadora.conf /etc/nginx/sites-available/cubadora.specialcore.com.br
+sudo ln -sf /etc/nginx/sites-available/cubadora.specialcore.com.br /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+
+# 3) HTTPS + senha do painel (recomendado)
+sudo certbot --nginx -d cubadora.specialcore.com.br
+# ver passo 5 do tutorial para o htpasswd
 ```
-cubagempi/
-  config/      Carregamento de configuração (YAML) e modelos
-  core/        Logging e utilidades transversais
-  hal/         Hardware Abstraction Layer (RS-485, GPIO, I²C) — real (Pi) + mock (PC)
-  drivers/     Protocolos: ultrassônico (5 bytes), Modbus RTU, balança, ATmega I²C
-  cubagem/     Regras de negócio: cálculo de dimensões, calibração, fluxo de medição
-  sim/         Simuladores de hardware para desenvolver/testar sem o Pi
-scripts/       Utilitários de linha de comando / demos
-tests/         Testes (rodam sem hardware via simuladores)
+Arquivos do deploy: `Dockerfile`, `docker-compose.yml`, `deploy/nginx-cubadora.conf`,
+`deploy/DEPLOY-VPS.md` (humano) e `deploy/AGENTE-DEPLOY.md` (passo a passo para agente).
+
+---
+
+## Rodar o EQUIPAMENTO (Raspberry Pi)
+Instalação automática (detecta a versão do Pi/SO e configura o kiosk):
+```bash
+cd cubagem-pi/python && bash deploy/install.sh && sudo reboot
 ```
+Para apontar o equipamento ao painel de frota, no `config.yaml`:
+```yaml
+frota:
+  servidor: https://cubadora.specialcore.com.br
+  unidade: "Nome da unidade"
+  auto_update: true
+```
+Guias: **[`INSTALACAO.md`](INSTALACAO.md)** (instalar) · **[`MANUAL.md`](MANUAL.md)** (operar/calibrar)
+· **[`GESTAO.md`](GESTAO.md)** (atualização automática + frota) · **[`COMO-RODAR.md`](COMO-RODAR.md)**.
 
-A HAL permite **desenvolver e testar no PC (Windows)** usando simuladores e depois rodar no
-Raspberry Pi apenas trocando a implementação (mesma interface).
-
-## Rodando a demo sem hardware (PC)
+## Rodar no PC sem hardware (simulado)
 ```bash
 cd python
-python scripts/read_sensors.py          # usa simulador de sensores
+python scripts/run.py --no-gui     # painel em http://localhost:8080 (usa simuladores)
 ```
-Opcional (para ler config de arquivo): `pip install pyyaml` e
-`python scripts/read_sensors.py --config config.example.yaml`.
 
-## No Raspberry Pi
+## Publicar uma nova versão para a frota (do dev)
 ```bash
-pip install -r requirements.txt -r requirements-pi.txt
-python scripts/read_sensors.py --config /home/pi/cubagem-pi/config.yaml --real
+python deploy/publish.py --servidor https://cubadora.specialcore.com.br --versao 1.1.0 --user admin --senha SENHA
+```
+→ os equipamentos baixam e atualizam sozinhos no próximo heartbeat.
+
+## Estrutura
+```
+cubagempi/   aplicação do equipamento (config, hal, drivers, maquina, web, gui, integracao, app)
+fleet/       servidor do painel de frota (db + http server + dashboard)
+deploy/      Docker/NGINX/kiosk/instalador + publish.py + tutoriais de deploy
+scripts/     run.py (inicia a aplicação), read_sensors.py (demo)
+tests/       15 suítes de teste (rodam sem hardware via simuladores)
 ```
 
-## Status
-Em construção. Núcleo implementado até agora: camada RS-485, driver ultrassônico,
-cálculo de dimensões e simulador. Próximas fases em `TODO.md`.
+Versão atual: **v1.0.0**. Roadmap/itens em [`TODO.md`](TODO.md).
