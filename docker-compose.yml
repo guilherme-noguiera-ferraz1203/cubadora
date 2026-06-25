@@ -1,0 +1,15 @@
+# Servidor de frota da cubagem.
+# Sobe com:  docker compose up -d --build
+# Expõe a porta só no localhost da VPS; o NGINX faz o proxy do domínio.
+services:
+  fleet:
+    build: .
+    image: cubagem-fleet:latest
+    container_name: cubagem-fleet
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9000:9000"      # acessível só localmente; NGINX faz o proxy público
+    volumes:
+      - ./fleet-data:/data         # persiste fleet.db + pacotes de versão
+    environment:
+      - FLEET_PACKAGES=/data/packages

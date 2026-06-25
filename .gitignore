@@ -1,0 +1,24 @@
+# Artefatos e dados locais (não versionar)
+__pycache__/
+*.pyc
+*.pyo
+
+# Dados/persistência do equipamento e do servidor de frota
+*.db
+data/
+fleet-data/
+fleet/packages/
+bkp/
+
+# Config específica de cada equipamento (use config.example.yaml como base)
+config.yaml
+cfg_*.yaml
+
+# Build de documentos e pacotes
+_docbuild/node_modules/
+_docbuild/package*.json
+*.docx
+*.zip
+
+# Logs
+*.log

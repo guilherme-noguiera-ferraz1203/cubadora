@@ -1,0 +1,17 @@
+[Unit]
+Description=Cubagem PI (Python)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/cubagem-pi/python
+ExecStart=/usr/bin/python3 scripts/run.py --config /home/pi/cubagem-pi/python/config.yaml --real --no-gui
+Restart=on-failure
+RestartSec=5
+# Para rodar com a GUI local (tela touch), remova --no-gui e descomente:
+# Environment=DISPLAY=:0
+
+[Install]
+WantedBy=multi-user.target

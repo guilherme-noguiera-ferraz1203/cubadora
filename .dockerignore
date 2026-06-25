@@ -1,0 +1,10 @@
+# Mantém a imagem pequena e não vaza dados locais.
+data/
+*.db
+bkp/
+_docbuild/
+**/__pycache__/
+*.pyc
+*.docx
+fleet/packages/
+config.yaml

@@ -1,0 +1,6 @@
+# Dependências exclusivas do Raspberry Pi (não instalam/usam no Windows).
+pyserial>=3.5      # porta serial /dev/ttyAMA0 (RS-485)
+smbus2>=0.4        # I²C (ponte ATmega) - Fase 4
+gpiozero>=2.0      # GPIO (DE do RS-485, LED, botões)
+lgpio>=0.2         # backend de GPIO recomendado no Pi 5 / Bookworm
+# picamera2        # câmera - Fase 10 (geralmente já vem no Raspberry Pi OS)

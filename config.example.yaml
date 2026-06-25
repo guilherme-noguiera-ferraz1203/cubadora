@@ -1,0 +1,174 @@
+modelo_maquina: ESTATICA_2
+casa_decimal_medidas: 1
+serial_maquina: ''
+versao: 0.1.0-py
+nome_equipamento: Cubadora
+logo_path: data/logo.png
+tema: escuro
+modo_teste: false
+totalizacao_peso: false
+rs485:
+  serial_port: /dev/ttyAMA0
+  baudrate: 115200
+  timeout_ms: 50
+  millis_min_write_interval: 5
+  de_pin_bcm: 12
+  use_lib_pi485: true
+sensor:
+  enderecos:
+  - 11
+  - 13
+  - 15
+  - 17
+  enderecos2:
+  - 12
+  - 14
+  - 16
+  - 18
+  endereco_temperatura: 1
+  leituras: 10
+  leituras_ultrasonico: 1
+  delay_ultrasonico: 1
+  range_ultrasonico: 1
+  tentativas: 1
+  delay_inicio: 200
+  delay_sensores_ms: 10
+  intervalo_minimo_endereco_ms: 0
+  minimo_sensor:
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  maximo_sensor:
+  - 124.0
+  - 41.0
+  - 41.0
+  - 66.0
+  temperatura: 19.9
+  ajuste_temperatura: 0.0
+  intervalo_temperatura_s: 100
+ajustes:
+  altura: 0.988
+  aux_altura: 124.0
+  largura: 0.995
+  aux_largura: 66.0
+  comprimento: 0.9829
+  aux_comprimento: 82.0
+balanca:
+  endereco: 2
+  registro_peso: 400
+  peso_minimo: 0.2
+  ajuste_peso: 0.0
+  casa_decimal_peso: 100.0
+  i2c_bus: 1
+  i2c_address: 4
+  i2c_serial_device: 20
+  registro_tara: 0
+  peso_simulado: 2.17
+camera:
+  habilitada: false
+  comando: picamera -n -awb fluorescent -co -20 -br 50 -ss 5500 -t 50 -w 1600 -h 900
+    -o /tmp/$etiqueta.jpg
+  arquivo: /tmp/$etiqueta.jpg
+  delay_ms: 550
+  largura_simulada: 37.0
+  comprimento_simulado: 31.0
+  crop_left: 0
+  crop_top: 0
+  crop_right: 0
+  crop_bottom: 0
+  altura_a: -0.00105763
+  altura_b: 0.178915663
+  rgb_threshold: 60
+dinamica:
+  clp_enabled: false
+  endereco_clp: 1
+  velocidade_esteira: 825
+  millis_aguardar_cubagem: 2000
+  altura_min: 5.0
+  altura_max: 95.0
+  largura_min: 5.0
+  largura_max: 90.0
+  comprimento_min: 5.0
+  comprimento_max: 110.0
+  peso_min: 0.4
+  peso_max: 60.0
+cloud:
+  target: http://cloud.compudeck.com.br/cubagem/webresources
+  target_secure: https://cloud.compudeck.com.br/cubagem/webresources
+web:
+  porta: 8080
+  senha_admin: ''
+  senha_cliente: ''
+  senha_suporte: ''
+etiqueta:
+  tamanho_total: 0
+  posicao_nota: 0
+  tamanho_nota: 0
+  posicao_quantidade_volumes: 0
+  tamanho_quantidade_volumes: 0
+  posicao_numero_volume: 0
+  tamanho_numero_volume: 0
+  posicao_cnpj: 0
+  tamanho_cnpj: 0
+  tamanho_cep: 0
+  regex: ''
+  nome_cep: CEP
+  nota_mais_volumes: false
+  danfe: false
+  peso_nota_fiscal: false
+  modo_cep: false
+calibracao:
+  altura: 15.0
+  largura: 20.0
+  comprimento: 25.0
+  peso: 2.17
+  range_peso: 0.2
+  range_sensor: 1.0
+  codigo_cubo: ''
+login:
+  enabled: false
+  minutes_autologout: 10
+  usuarios: {}
+leitor:
+  modelo: NENHUM
+  com_port: /dev/ttyUSB0
+  baudrate: 9600
+  i2c_serial_device: 21
+lcd:
+  modelo: NENHUM
+  i2c_bus: 1
+  i2c_address: 39
+sorter:
+  enabled: false
+  endereco_clp: 1
+  registro_destino: 260
+  envio_imediato: false
+atm:
+  endereco_clp: 1
+  registro_porta_fechada: 1020
+  registro_objeto_presente: 1021
+frota:                            # painel central de gerenciamento (atualização automática)
+  servidor: ''                    # URL do painel de frota (ex.: http://192.168.0.10:9000). Vazio = desligado
+  unidade: ''                     # unidade/local da máquina (ex.: "CD São Paulo") — aparece no painel
+  heartbeat_segundos: 300         # de quanto em quanto reporta ao painel
+  auto_update: true               # baixa e aplica a versão-alvo automaticamente
+  device_id: ''                   # gerado automaticamente se vazio
+  adotado: false
+  chave: ''
+integracao:
+- name: VESTRA_ESL_PITNEY
+  enabled: 'true'
+  classe: com.compudeck.cubagem.model.integracao.RestClient
+  $target: https://vestra.eslcloud.com.br/api/integration/cubage/volumes
+  header-Authorization: Bearer SEU_TOKEN_AQUI
+  json: '{"volume":{"code":"$etiqueta","weight":$peso,"length":$comprimento,"width":$largura,"height":$altura}}'
+  medida-fator: '0.01'
+  medida-format: '%.2f'
+  peso-fator: '1'
+  peso-format: '%.2f'
+  locale: en_US
+  success-tag: '*'
+  accept-media-type: '*/*'
+  enable-command: '*i*'
+  timer: 'true'
