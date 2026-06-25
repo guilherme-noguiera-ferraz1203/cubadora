@@ -4,8 +4,7 @@ ListenAddress 0.0.0.0
 PermitRootLogin no
 PasswordAuthentication no
 PubkeyAuthentication yes
-ChallengeResponseAuthentication no
-UsePAM no
+KbdInteractiveAuthentication no
 AuthorizedKeysFile /tunnel-keys/authorized_keys
 AllowTcpForwarding yes
 GatewayPorts clientspecified
