@@ -66,7 +66,10 @@ button{background:#2563eb;color:#fff;border:none;cursor:pointer;font-weight:600}
 <script>
 async function getj(u){return await (await fetch(u)).json()}
 async function post(u,b){return await (await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})).json()}
-function online(last){if(!last)return false;return (Date.now()-new Date(last).getTime())<15*60*1000}
+function idadeSeg(last){if(!last)return Infinity;return (Date.now()-new Date(last).getTime())/1000}
+// Online de verdade: heartbeat e a cada ~10s; toleramos 3 perdidos (35s) antes de marcar offline.
+function online(last){return idadeSeg(last)<35}
+function hatempo(last){const s=idadeSeg(last);if(!isFinite(s))return 'nunca visto';if(s<60)return 'há '+Math.round(s)+'s';if(s<3600)return 'há '+Math.round(s/60)+'min';if(s<86400)return 'há '+Math.round(s/3600)+'h';return 'há '+Math.round(s/86400)+'d'}
 function verBadge(v,alvo){if(!v)return '<span class="badge b-off">?</span>';return v===alvo?'<span class="badge b-ok">'+v+'</span>':'<span class="badge b-old">'+v+' ↑</span>'}
 let ALVO='';
 async function carregar(){
@@ -79,7 +82,7 @@ async function carregar(){
  document.getElementById('grid').innerHTML=ds.map(d=>{const p=d.producao||{};const onl=online(d.last_seen);const pend=!d.last_seen;
   return `<div class="dev" onclick="detalhe('${d.device_id}')">
    <div class="top"><span class="nome">${d.nome||d.device_id}</span>${pend?'<span class="badge b-old">aguardando</span>':verBadge(d.versao,ALVO)}</div>
-   <div class="uni"><span class="dot" style="background:${pend?'#f59e0b':(onl?'#22c55e':'#cbd5e1')}"></span>${pend?'aguardando instalação':(onl?'online':'offline')} · ${d.unidade||'sem unidade'} · ${d.modelo||''}</div>
+   <div class="uni"><span class="dot" style="background:${pend?'#f59e0b':(onl?'#22c55e':'#cbd5e1')}"></span>${pend?'aguardando instalação':'<b style="color:'+(onl?'#15803d':'#64748b')+'">'+(onl?'online':'offline')+'</b> · visto '+hatempo(d.last_seen)} · ${d.unidade||'sem unidade'} · ${d.modelo||''}</div>
    ${pend?'<div class="kv" style="color:#b45309">Cadastrado — rode o link de instalação no Raspberry.</div>':`
    <div class="kv">IP ${d.ip||'-'} · ${d.status||''} ${d.aferido?'':'· <b style=color:#b45309>não aferido</b>'}</div>
    <div class="kv">Volumes ${p.volumes||0} · Vol/h ${p.vol_h||0} · Integr. erro ${p.integracao_erro||0}</div>`}
@@ -104,7 +107,7 @@ async function cmdTexto(id){const t=document.getElementById('cmdtxt').value.trim
 async function cmdConfig(id){const sec=document.getElementById('cfgsec').value.trim();let dd={};try{dd=JSON.parse(document.getElementById('cfgdados').value||'{}')}catch(e){alert('JSON inválido em Dados');return}if(sec)await cmd(id,'config',{secao:sec,dados:dd})}
 async function detalhe(id){const d=await getj('/api/device/'+id);const dev=d.device,ev=d.eventos||[],cmds=d.comandos||[];const onl=online(dev.last_seen);
  document.getElementById('box').innerHTML=`<h2 style="margin-bottom:4px">${esc(dev.nome||id)}</h2>
-  <div style="color:#64748b;margin-bottom:6px"><span class="dot" style="background:${onl?'#22c55e':'#cbd5e1'}"></span>${onl?'online':'offline'} · ${esc(dev.unidade||'sem unidade')} · ${esc(dev.modelo||'')} · versão ${esc(dev.versao||'?')} · visto ${(dev.last_seen||'').replace('T',' ').substr(0,19)}</div>
+  <div style="color:#64748b;margin-bottom:6px"><span class="dot" style="background:${onl?'#22c55e':'#cbd5e1'}"></span><b style="color:${onl?'#15803d':'#64748b'}">${onl?'online':'offline'}</b> · visto ${hatempo(dev.last_seen)} · ${esc(dev.unidade||'sem unidade')} · ${esc(dev.modelo||'')} · versão ${esc(dev.versao||'?')}</div>
 
   <h3 style="margin:12px 0 6px">Controles</h3>
   <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -255,20 +258,19 @@ print("   config gravado:", cfg_path)
 PY
 chown "$TARGET_USER":"$TARGET_USER" "$APP_DIR/config.yaml"
 
-# A aplicacao roda em modo KIOSK: o install.sh/setup-kiosk.sh ja configurou o auto-start
-# (backend --no-gui na porta 8080 + Chromium em tela cheia) e o heartbeat roda dentro desse
-# backend. NAO habilitamos o servico systemd headless 'cubagempi' aqui: ele brigaria com o
-# kiosk pela porta 8080 e pela serial (sintoma classico: tela piscando / app instavel).
-# Garante que ele fica desligado, mesmo se uma instalacao anterior o tiver habilitado.
-echo ">> Modo de execucao: kiosk (configurado pelo install.sh)."
-systemctl disable --now cubagempi 2>/dev/null || true
+# Reinicia o backend para carregar a config de frota recem-gravada e comecar a reportar ja.
+systemctl restart cubagempi 2>/dev/null || true
+
+# O install.sh ja configurou o backend como servico systemd (cubagempi) — sobe sozinho no boot,
+# independente do desktop — e a tela local pelo navegador. Nada a desabilitar aqui.
+echo ">> Modo: backend por systemd + tela local pelo navegador (configurado pelo install.sh)."
 
 echo ""
 echo "==================================================================="
-echo " Pronto! '$NOME' instalado."
-echo " Reinicie para abrir em tela cheia (kiosk):  sudo reboot"
-echo " Apos o reboot, ele reporta sozinho ao painel: $SERVIDOR"
-echo " Manutencao: tecla ESC sai do kiosk."
+echo " Pronto! '$NOME' instalado. O backend ja roda e reporta ao painel:"
+echo "   $SERVIDOR"
+echo " Reinicie para a tela local abrir:  sudo reboot"
+echo " Status do backend:  systemctl status cubagempi"
 echo "==================================================================="
 """
 

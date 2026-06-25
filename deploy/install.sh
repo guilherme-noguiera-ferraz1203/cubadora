@@ -54,13 +54,14 @@ if [ ! -f "$APP_DIR/config.yaml" ]; then
     sed -i "s#serial_port:.*#serial_port: $PORTA#" "$APP_DIR/config.yaml" 2>/dev/null || true
 fi
 
-# ----------------------------------------------------------- 5. KIOSK (liga e abre sozinho)
-echo ">> Configurando o modo kiosk (auto-início no boot)..."
-bash "$APP_DIR/deploy/setup-kiosk.sh"
+# ----------------------------------------------------------- 5. BACKEND (systemd) + TELA (navegador)
+echo ">> Configurando o backend (systemd) e a tela local (navegador)..."
+APP_DIR="$APP_DIR" bash "$APP_DIR/deploy/setup-kiosk.sh"
 
 echo ""
 echo "==================================================================="
 echo " Instalação concluída."
 echo " Ajuste $APP_DIR/config.yaml (modelo, sensores, ajustes) se preciso."
-echo " Reinicie para iniciar em modo kiosk:  sudo reboot"
+echo " O backend já roda como serviço (systemd) e sobe sozinho no boot."
+echo " Reinicie para a tela local abrir no navegador:  sudo reboot"
 echo "==================================================================="
