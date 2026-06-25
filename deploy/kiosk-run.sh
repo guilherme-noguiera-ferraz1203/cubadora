@@ -35,9 +35,12 @@ done
 # 3) Navegador em TELA CHEIA (kiosk). Cobre os dois nomes de binário do Chromium.
 CHROME="$(command -v chromium-browser || command -v chromium || echo chromium-browser)"
 while true; do
+    # --password-store=basic: nao usa o GNOME Keyring -> evita o popup
+    # "Choose password for new keyring" ao ligar (trava a tela do kiosk).
     "$CHROME" --kiosk --noerrdialogs --disable-infobars --disable-session-crashed-bubble \
         --disable-features=TranslateUI --check-for-update-interval=31536000 \
         --no-first-run --overscroll-history-navigation=0 --start-fullscreen \
+        --password-store=basic \
         "http://localhost:8080" 2>/dev/null
     echo "[kiosk] navegador encerrou; reabrindo em 3s..."; sleep 3
 done
