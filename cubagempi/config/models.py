@@ -212,6 +212,13 @@ class ConfigFrota:
 
 
 @dataclass
+class ConfigKiosk:
+    """Lockdown da tela local (modo produção): esconde abas de parametrização e bloqueia rotas."""
+    modo_producao: bool = False  # True = só mostra Painel; Calibrar/Config/Diag/Sistema só via ?admin=<chave>
+    chave_admin: str = ""        # se vazia, em modo produção, NINGUEM acessa as abas localmente
+
+
+@dataclass
 class AppConfig:
     modelo_maquina: ModeloMaquina = ModeloMaquina.ESTATICA_2
     casa_decimal_medidas: int = 1
@@ -236,6 +243,7 @@ class AppConfig:
     sorter: ConfigSorter = field(default_factory=ConfigSorter)
     atm: ConfigAtm = field(default_factory=ConfigAtm)
     frota: ConfigFrota = field(default_factory=ConfigFrota)
+    kiosk: ConfigKiosk = field(default_factory=ConfigKiosk)
     modo_teste: bool = False
     totalizacao_peso: bool = False
     # Lista de integrações (cada item = dict de parâmetros, igual ao listIntegracao do Java).

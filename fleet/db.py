@@ -55,10 +55,13 @@ class FleetDB:
         self._conn.row_factory = sqlite3.Row
         with self._lock:
             self._conn.executescript(_SCHEMA)
-            # Migração: versão-alvo POR equipamento (cada máquina tem a sua, p/ update/rollback isolado)
+            # Migração de colunas do device (cada uma é segura/idempotente)
             cols = [r["name"] for r in self._conn.execute("PRAGMA table_info(device)").fetchall()]
             if "versao_alvo" not in cols:
                 self._conn.execute("ALTER TABLE device ADD COLUMN versao_alvo TEXT")
+            if "estado" not in cols:
+                # snapshot completo do device (status_dict + sistema_info + ultimo diagnostico) em JSON
+                self._conn.execute("ALTER TABLE device ADD COLUMN estado TEXT")
             self._conn.commit()
 
     # --------------------------------------------------------------- devices
@@ -67,13 +70,24 @@ class FleetDB:
         with self._lock:
             existe = self._conn.execute("SELECT device_id FROM device WHERE device_id=?",
                                         (p.get("device_id"),)).fetchone()
+            estado_in = p.get("estado")
+            estado_str = json.dumps(estado_in) if estado_in else None
             if existe:
-                self._conn.execute(
-                    "UPDATE device SET nome=?,unidade=?,versao=?,modelo=?,ip=?,status=?,status_cor=?,"
-                    "aferido=?,integracao=?,producao=?,last_seen=? WHERE device_id=?",
-                    (p.get("nome"), p.get("unidade"), p.get("versao"), p.get("modelo"), p.get("ip"),
-                     p.get("status"), p.get("status_cor"), 1 if p.get("aferido") else 0,
-                     p.get("integracao"), json.dumps(p.get("producao") or {}), agora, p.get("device_id")))
+                # Se o heartbeat trouxe estado novo, atualiza; senão preserva o ultimo.
+                if estado_str is not None:
+                    self._conn.execute(
+                        "UPDATE device SET nome=?,unidade=?,versao=?,modelo=?,ip=?,status=?,status_cor=?,"
+                        "aferido=?,integracao=?,producao=?,last_seen=?,estado=? WHERE device_id=?",
+                        (p.get("nome"), p.get("unidade"), p.get("versao"), p.get("modelo"), p.get("ip"),
+                         p.get("status"), p.get("status_cor"), 1 if p.get("aferido") else 0,
+                         p.get("integracao"), json.dumps(p.get("producao") or {}), agora, estado_str, p.get("device_id")))
+                else:
+                    self._conn.execute(
+                        "UPDATE device SET nome=?,unidade=?,versao=?,modelo=?,ip=?,status=?,status_cor=?,"
+                        "aferido=?,integracao=?,producao=?,last_seen=? WHERE device_id=?",
+                        (p.get("nome"), p.get("unidade"), p.get("versao"), p.get("modelo"), p.get("ip"),
+                         p.get("status"), p.get("status_cor"), 1 if p.get("aferido") else 0,
+                         p.get("integracao"), json.dumps(p.get("producao") or {}), agora, p.get("device_id")))
             else:
                 self._conn.execute(
                     "INSERT INTO device (device_id,nome,unidade,versao,modelo,ip,status,status_cor,"
@@ -90,6 +104,8 @@ class FleetDB:
         for r in rows:
             d = dict(r)
             d["producao"] = json.loads(d.get("producao") or "{}")
+            # estado nao precisa ir na listagem (so no detalhe); economiza payload
+            d.pop("estado", None)
             out.append(d)
         return out
 
@@ -100,6 +116,11 @@ class FleetDB:
             return None
         d = dict(r)
         d["producao"] = json.loads(d.get("producao") or "{}")
+        if d.get("estado"):
+            try:
+                d["estado"] = json.loads(d["estado"])
+            except (TypeError, ValueError):
+                d["estado"] = None
         return d
 
     def create_pending_device(self, device_id: str, nome: str, unidade: str) -> bool:

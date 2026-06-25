@@ -94,6 +94,27 @@ function resumirEventos(ev){
  return g.slice(0,40).map(x=>`<div class="ev"><span class="${x.nivel==='WARNING'?'warn':'err'}">${nivelPt(x.nivel)}</span> ${esc(x.msg)}${x.n>1?` <b>×${x.n}</b>`:''} <span style="color:#94a3b8">${(x.data||'').replace('T',' ').substr(11,8)}</span></div>`).join('');
 }
 function statusCmd(s){return {pendente:'⏳ na fila',enviado:'📨 enviado',executado:'✅ ok',erro:'❌ erro'}[s]||s}
+function ksec(s){if(s<60)return s+'s';if(s<3600)return Math.round(s/60)+'min';return Math.round(s/3600)+'h'}
+function snapshot(est){
+ if(!est)return '<p class="hint">Aguardando primeiro snapshot do equipamento…</p>';
+ const sis=est.sistema||{}, st=est.status||{}, di=est.diagnostico;
+ const card=(t,v,extra)=>`<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px;min-width:120px"><div style="color:#64748b;font-size:11px;text-transform:uppercase">${t}</div><div style="font-weight:700;font-size:18px">${v}</div>${extra?'<div style="font-size:11px;color:#64748b">'+extra+'</div>':''}</div>`;
+ let html='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">';
+ if(sis.cpu_temp!=null)html+=card('CPU °C',sis.cpu_temp,sis.modelo_pi||'');
+ if(sis.uptime)html+=card('Uptime',sis.uptime,'');
+ if(sis.disco_livre_gb!=null)html+=card('Disco livre',sis.disco_livre_gb+' GB','de '+(sis.disco_total_gb||'?')+' GB');
+ if(sis.ip)html+=card('IP',sis.ip,sis.tipo_conexao||'');
+ if(st.status_texto)html+=card('Estado',st.status_texto,st.aferido?'aferido':'NAO aferido');
+ if(st.integracao_nome)html+=card('Integração',st.integracao_nome,st.integracao_habilitada?'on':'off');
+ const tot=st.totalizacao||{};if(tot.volume!=null)html+=card('Totalização',tot.volume+' m³',tot.quantidade+' vol');
+ html+='</div>';
+ if(di){
+  const ok=di.apto_producao?'✅ apto':'⚠️ com problemas';
+  const sensores=(di.sensores||[]).map(s=>(s.respondendo?'✓':'✗')+s.endereco).join(' ');
+  html+=`<div class="hint">Último diagnóstico: <b>${ok}</b> · sensores: ${sensores||'-'} · balança: ${di.balanca?.ok?'✓ '+di.balanca.peso+'kg':'✗'}${di.ts?' · '+(di.ts||'').replace('T',' ').substr(11,8):''}</div>`;
+ }
+ return html;
+}
 async function cmd(id,tipo,parametros){
  if((tipo==='reboot'||tipo==='shutdown')&&!confirm('Confirmar '+tipo+' no equipamento?'))return;
  const r=await post('/api/command',{device_id:id,tipo,parametros:parametros||{}});
@@ -102,6 +123,7 @@ async function cmd(id,tipo,parametros){
 }
 async function cmdTexto(id){const t=document.getElementById('cmdtxt').value.trim();if(t)await cmd(id,'comando',{texto:t})}
 async function cmdConfig(id){const sec=document.getElementById('cfgsec').value.trim();let dd={};try{dd=JSON.parse(document.getElementById('cfgdados').value||'{}')}catch(e){alert('JSON inválido em Dados');return}if(sec)await cmd(id,'config',{secao:sec,dados:dd})}
+async function cmdConfigKiosk(id,on){await cmd(id,'config',{secao:'kiosk',dados:{modo_producao:on}})}
 async function detalhe(id){const d=await getj('/api/device/'+id);const dev=d.device,ev=d.eventos||[],cmds=d.comandos||[];const onl=online(dev.last_seen);
  const optsVer=['<option value="">(não atualizar)</option>'].concat(VERSOES.map(v=>'<option value="'+v+'"'+(v===(dev.versao_alvo||'')?' selected':'')+'>'+v+'</option>')).join('');
  document.getElementById('box').innerHTML=`<h2 style="margin-bottom:4px">${esc(dev.nome||id)}</h2>
@@ -116,12 +138,23 @@ async function detalhe(id){const d=await getj('/api/device/'+id);const dev=d.dev
   </div>
   ${VERSOES.length?'':'<div class="hint" style="margin-top:4px">Nenhuma versão publicada ainda — publique com <code>deploy/publish.py</code>.</div>'}
 
+  <h3 style="margin:12px 0 6px">Estado do equipamento</h3>
+  ${snapshot(dev.estado)}
+
   <h3 style="margin:12px 0 6px">Controles</h3>
   <div style="display:flex;gap:8px;flex-wrap:wrap">
    <button onclick="cmd('${id}','restart_app')" style="background:#f59e0b">⚡ Reiniciar app</button>
    <button onclick="cmd('${id}','update',{versao:dev.versao_alvo||''})" style="background:#2563eb" ${dev.versao_alvo?'':'disabled title="Defina a versao-alvo acima primeiro"'}>⬆️ Atualizar agora</button>
+   <button onclick="cmd('${id}','diagnostico')" style="background:#0891b2">🩺 Rodar diagnóstico</button>
    <button onclick="cmd('${id}','reboot')" style="background:#dc2626">🔄 Reiniciar equipamento</button>
    <button onclick="cmd('${id}','shutdown')" style="background:#475569">⏻ Desligar</button>
+  </div>
+
+  <h3 style="margin:12px 0 6px">Modo produção (lockdown da tela local)</h3>
+  <div class="hint" style="margin-bottom:6px">Quando ligado, a tela do equipamento mostra <b>SÓ a operação</b>: as abas Calibrar/Configuração/Diagnóstico/Sistema somem (e ficam liberadas só pelo painel da VPS).</div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+   <button onclick="cmdConfigKiosk('${id}',true)" style="background:#16a34a">🔒 Ligar modo produção</button>
+   <button onclick="cmdConfigKiosk('${id}',false)" style="background:#e2e8f0;color:#0f172a">🔓 Desligar (acesso completo local)</button>
   </div>
   ${onl?'':'<div class="hint" style="color:#b45309;margin-top:6px">Offline — o comando fica na fila e roda quando reconectar.</div>'}
 

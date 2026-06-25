@@ -35,6 +35,7 @@ class FleetAgent:
         self._ultimo_seq = 0
         self._executados: set = set()   # ids de comandos já executados (dedup)
         self._resultados: list = []     # resultados pendentes de reportar ao painel
+        self._ultimo_diag: dict | None = None  # cache do ultimo diagnostico sob demanda
 
     def start(self) -> None:
         if not self.cfg.servidor:
@@ -49,6 +50,17 @@ class FleetAgent:
     def _coletar_eventos(self) -> list[dict]:
         self._ultimo_seq, eventos = get_log_buffer().desde(self._ultimo_seq, ("WARNING", "ERROR", "CRITICAL"))
         return eventos[-30:]  # no máximo 30 por heartbeat
+
+    def _estado_completo(self) -> dict:
+        """Snapshot rico p/ o painel: status_dict (leve) + sistema_info (leve) + ultimo diagnostico."""
+        estado: dict = {}
+        try: estado["status"] = self.app.status_dict()
+        except Exception as exc: estado["status_erro"] = str(exc)[:120]  # noqa: BLE001
+        try: estado["sistema"] = self.app.get_sistema_info()
+        except Exception as exc: estado["sistema_erro"] = str(exc)[:120]  # noqa: BLE001
+        if self._ultimo_diag:
+            estado["diagnostico"] = self._ultimo_diag
+        return estado
 
     def _payload(self) -> dict:
         ident = self.app.identidade()
@@ -66,6 +78,7 @@ class FleetAgent:
             "producao": self.app.producao_dict(),
             "eventos": self._coletar_eventos(),
             "comandos_resultado": list(self._resultados),  # ACK dos comandos executados
+            "estado": self._estado_completo(),              # snapshot rico para o painel
         }
 
     def heartbeat(self) -> dict | None:
@@ -117,6 +130,13 @@ class FleetAgent:
             if tipo == "comando":
                 # Acesso a TODOS os comandos do dispatcher (tara, calibrar, integração, etc.)
                 return self.app.dispatcher.execute(par.get("texto", ""))
+            if tipo == "diagnostico":
+                # Roda o diagnostico (pesado: le sensores e balanca) e cacheia para enviar
+                # no proximo heartbeat dentro de estado.diagnostico.
+                self._ultimo_diag = self.app.diagnostico()
+                self._ultimo_diag["ts"] = __import__("datetime").datetime.now().isoformat()
+                ok = self._ultimo_diag.get("apto_producao")
+                return ("Diagnostico OK" if ok else "Diagnostico com problemas") + " (ver detalhes no painel)"
             return f"Comando desconhecido: {tipo}"
         except Exception as exc:  # noqa: BLE001
             log.exception("Frota: falha ao executar comando %s", tipo)

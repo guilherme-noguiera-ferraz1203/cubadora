@@ -392,17 +392,46 @@ def _make_handler(app):
             except Exception:  # noqa: BLE001
                 return {}
 
+        def _lockdown_ativo(self) -> bool:
+            """Modo producao: esconde abas de parametrizacao e bloqueia as paginas /config etc.
+            Libera via ?admin=<chave_admin> (se chave nao vazia)."""
+            k = getattr(app.config, "kiosk", None)
+            if not k or not getattr(k, "modo_producao", False):
+                return False
+            try:
+                from urllib.parse import urlparse, parse_qs
+                qs = parse_qs(urlparse(self.path).query)
+                admin = (qs.get("admin", [""])[0] or "").strip()
+            except Exception:  # noqa: BLE001
+                admin = ""
+            chave = (k.chave_admin or "").strip()
+            return not (chave and admin == chave)
+
+        def _html_locked(self, html: str) -> str:
+            # Em modo producao, remove os links das abas que nao devem aparecer no kiosk.
+            if not self._lockdown_ativo():
+                return html
+            for href in ('/calibrar', '/config', '/diagnostico', '/sistema'):
+                # remove a tag <a href="<href>" ...>...</a> inteira
+                import re
+                html = re.sub(r'<a href="' + re.escape(href) + r'"[^>]*>.*?</a>', '', html)
+            return html
+
         def do_GET(self):
             p = self.path
             if p == "/" or p.startswith("/index"):
-                self._html(_DASH)
+                self._html(self._html_locked(_DASH))
             elif p.startswith("/config"):
+                if self._lockdown_ativo(): return self._send(403, b"bloqueado: modo producao", "text/plain")
                 self._html(build_config_page())
             elif p.startswith("/calibrar"):
+                if self._lockdown_ativo(): return self._send(403, b"bloqueado: modo producao", "text/plain")
                 self._html(_CALIBRAR)
             elif p.startswith("/diagnostico"):
+                if self._lockdown_ativo(): return self._send(403, b"bloqueado: modo producao", "text/plain")
                 self._html(_DIAG)
             elif p.startswith("/sistema"):
+                if self._lockdown_ativo(): return self._send(403, b"bloqueado: modo producao", "text/plain")
                 self._html(_SISTEMA)
             elif p.startswith("/logo"):
                 data = app.ler_logo()
