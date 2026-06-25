@@ -17,6 +17,10 @@ cfg_*.yaml
 # Override de compose específico do servidor/VPS (não versionar)
 docker-compose.override.yml
 
+# Chaves SSH dos tuneis reversos (geradas em runtime, especificas da VPS)
+tunnel-keys/
+sshd-host-keys/
+
 # Build de documentos e pacotes
 _docbuild/node_modules/
 _docbuild/package*.json

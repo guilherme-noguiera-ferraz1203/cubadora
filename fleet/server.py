@@ -413,6 +413,77 @@ def _bootstrap_script(servidor: str, device_id: str, nome: str, unidade: str) ->
             .replace("__REPO__", _REPO))
 
 
+# Script de limpeza servido em GET /uninstall. Roda no Raspberry como:
+#   curl -fsSL https://.../uninstall | sudo bash
+# Remove services, sudoers, autostarts (em /root e /home/*) e move o repo pra backup.
+_UNINSTALL = r"""#!/usr/bin/env bash
+# Cubadora - desinstalar este equipamento (limpeza completa antes de reinstalar).
+echo "==================================================================="
+echo " Cubadora - DESINSTALAR este equipamento"
+echo "==================================================================="
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "!! Precisa de root. Rode: curl -fsSL <servidor>/uninstall | sudo bash" >&2
+    exit 1
+fi
+
+for svc in cubagempi cubagempi-tunnel; do
+    if systemctl list-unit-files 2>/dev/null | grep -q "^$svc.service"; then
+        echo ">> Parando e desabilitando $svc.service..."
+        systemctl disable --now "$svc" 2>/dev/null || true
+        rm -f "/etc/systemd/system/$svc.service"
+    fi
+done
+systemctl daemon-reload 2>/dev/null || true
+
+if [ -f /etc/sudoers.d/cubagempi-nopasswd ]; then
+    echo ">> Removendo /etc/sudoers.d/cubagempi-nopasswd"
+    rm -f /etc/sudoers.d/cubagempi-nopasswd
+fi
+
+for HOME_DIR in /root /home/*; do
+    [ -d "$HOME_DIR" ] || continue
+    for f in \
+        "$HOME_DIR/.config/autostart/cubagem-kiosk.desktop" \
+        "$HOME_DIR/.config/labwc/autostart" \
+        "$HOME_DIR/.config/wayfire.ini"; do
+        if [ -e "$f" ]; then
+            echo ">> Limpando $f"
+            case "$f" in
+                *.desktop)
+                    rm -f "$f"
+                    ;;
+                */labwc/autostart|*/wayfire.ini)
+                    sed -i '/cubagem/d' "$f" 2>/dev/null || true
+                    [ -s "$f" ] || rm -f "$f"
+                    ;;
+            esac
+        fi
+    done
+done
+
+for HOME_DIR in /root /home/*; do
+    [ -d "$HOME_DIR" ] || continue
+    if [ -d "$HOME_DIR/cubagem-pi" ]; then
+        FINAL_BAK="$HOME_DIR/cubagem-pi.bak.$(date +%Y%m%d%H%M%S)"
+        echo ">> Movendo $HOME_DIR/cubagem-pi -> $FINAL_BAK (preserva config.yaml e dados)"
+        mv "$HOME_DIR/cubagem-pi" "$FINAL_BAK"
+    fi
+    for k in "$HOME_DIR/.ssh/cubadora-tunnel" "$HOME_DIR/.ssh/cubadora-tunnel.pub"; do
+        [ -e "$k" ] && { echo ">> Removendo chave do tunel $k"; rm -f "$k"; }
+    done
+done
+
+rm -f /tmp/cubagem-kiosk*.lock /run/user/*/cubagem-kiosk*.lock 2>/dev/null || true
+
+echo ""
+echo "==================================================================="
+echo " Desinstalacao concluida. Para reinstalar, peca o link novo no painel"
+echo " (cadastrar equipamento) ou rode novamente o curl do device existente."
+echo "==================================================================="
+"""
+
+
 def _make_handler(db: FleetDB):
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -468,15 +539,18 @@ def _make_handler(db: FleetDB):
                         try:
                             txt = body.decode("utf-8")
                             # Reescreve paths absolutos -> /device/<id>/...
-                            # Cobre fetch('/api/...'), <a href="/...">, src="/logo", action="/...",
-                            # e os literals JS das rotas do menu (/calibrar /config /diagnostico /sistema).
+                            # Ordem importa: PRIMEIRO atributos HTML (href=/src=/action=), DEPOIS literals
+                            # JS soltos. Senao um href="/calibrar" reescrito vira /device/.../device/.../...
+                            for atr in ("href", "src", "action"):
+                                for q in ('"', "'"):
+                                    txt = txt.replace(f'{atr}={q}/', f'{atr}={q}{prefix}/')
+                            # Literals JS (chamadas fetch, chaves de map, etc.). Apos os atributos,
+                            # esses '/calibrar' que ja estao em href= viraram '/device/<id>/calibrar'
+                            # entao o pattern nao acha mais a versao antiga -> sem duplicacao.
                             rotas = ("api/", "logo", "calibrar", "config", "diagnostico", "sistema")
                             for r in rotas:
                                 for q in ('"', "'"):
                                     txt = txt.replace(f'{q}/{r}', f'{q}{prefix}/{r}')
-                            for atr in ("href", "src", "action"):
-                                for q in ('"', "'"):
-                                    txt = txt.replace(f'{atr}={q}/', f'{atr}={q}{prefix}/')
                             # nao prefixar URLs absolutas (http*) — desfaz qualquer encavalamento
                             for bad in (prefix + '/http', prefix + '/https'):
                                 txt = txt.replace(bad, '/' + bad[len(prefix)+1:])
@@ -548,6 +622,10 @@ def _make_handler(db: FleetDB):
                 script = _bootstrap_script(self._base_url(), device_id,
                                            dev.get("nome") or "", dev.get("unidade") or "")
                 self._send(200, script.encode("utf-8"), "text/x-shellscript; charset=utf-8")
+            elif p in ("/uninstall", "/uninstall/"):
+                # Público: o Pi baixa para limpar tudo antes de reinstalar.
+                self._send(200, _UNINSTALL.encode("utf-8"),
+                           "text/x-shellscript; charset=utf-8")
             else:
                 self._json({"erro": "not found"}, 404)
 
