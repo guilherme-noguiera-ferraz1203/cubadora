@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import secrets
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -30,7 +31,11 @@ _PAGE = """<!doctype html><html lang=pt-BR><head><meta charset=utf-8>
 body{background:#eef2f7;color:#0f172a;padding:18px}
 h1{font-size:22px;margin-bottom:4px}.sub{color:#64748b;margin-bottom:16px}
 .bar{background:#fff;border:1px solid #dbe3ec;border-radius:12px;padding:14px;margin-bottom:16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
-select,button{padding:9px 12px;border-radius:8px;border:1px solid #cbd5e1;font-size:14px}
+input,select,button{padding:9px 12px;border-radius:8px;border:1px solid #cbd5e1;font-size:14px}
+label{display:block;font-size:13px;font-weight:600;color:#334155;margin:10px 0 4px}
+input{width:100%}
+.cmd{background:#0f172a;color:#e2e8f0;border-radius:8px;padding:12px;font-family:Consolas,monospace;font-size:13px;word-break:break-all;margin:8px 0}
+.hint{color:#64748b;font-size:13px;line-height:1.5}
 button{background:#2563eb;color:#fff;border:none;cursor:pointer;font-weight:600}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
 .dev{background:#fff;border:1px solid #dbe3ec;border-radius:12px;padding:14px;cursor:pointer}
@@ -41,8 +46,9 @@ button{background:#2563eb;color:#fff;border:none;cursor:pointer;font-weight:600}
 .badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:12px;font-weight:700}
 .b-ok{background:#dcfce7;color:#15803d}.b-old{background:#fee2e2;color:#b91c1c}.b-off{background:#f1f5f9;color:#64748b}
 .kv{color:#475569;font-size:13px;margin-top:8px}
-#modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;padding:20px}
+#modal,#regmodal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;padding:20px}
 #modal .box{background:#fff;border-radius:14px;max-width:760px;width:100%;max-height:85vh;overflow:auto;padding:20px}
+#regmodal .box{background:#fff;border-radius:14px;max-width:560px;width:100%;max-height:85vh;overflow:auto;padding:20px}
 .ev{border-bottom:1px solid #eef2f7;padding:7px 0;font-size:13px;font-family:Consolas,monospace}
 .ev .err{color:#b91c1c}.ev .warn{color:#b45309}
 </style></head><body>
@@ -52,9 +58,11 @@ button{background:#2563eb;color:#fff;border:none;cursor:pointer;font-weight:600}
  <select id="selVer"></select>
  <button onclick="definirAlvo()">Definir versão alvo (atualiza todos)</button>
  <span style="color:#64748b;font-size:13px">Publique novas versões com <code>deploy/publish.py</code>.</span>
+ <button onclick="abrirCadastro()" style="background:#16a34a;margin-left:auto">➕ Cadastrar equipamento</button>
 </div>
 <div class="grid" id="grid"></div>
 <div id="modal" onclick="if(event.target.id==='modal')fecha()"><div class="box" id="box"></div></div>
+<div id="regmodal" onclick="if(event.target.id==='regmodal')fechaReg()"><div class="box" id="regbox"></div></div>
 <script>
 async function getj(u){return await (await fetch(u)).json()}
 async function post(u,b){return await (await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})).json()}
@@ -68,13 +76,14 @@ async function carregar(){
  const ds=await getj('/api/devices');
  let on=0;ds.forEach(d=>{if(online(d.last_seen))on++});
  document.getElementById('resumo').textContent=ds.length+' equipamento(s) · '+on+' online · '+(ds.length-on)+' offline';
- document.getElementById('grid').innerHTML=ds.map(d=>{const p=d.producao||{};const onl=online(d.last_seen);
+ document.getElementById('grid').innerHTML=ds.map(d=>{const p=d.producao||{};const onl=online(d.last_seen);const pend=!d.last_seen;
   return `<div class="dev" onclick="detalhe('${d.device_id}')">
-   <div class="top"><span class="nome">${d.nome||d.device_id}</span>${verBadge(d.versao,ALVO)}</div>
-   <div class="uni"><span class="dot" style="background:${onl?'#22c55e':'#cbd5e1'}"></span>${onl?'online':'offline'} · ${d.unidade||'sem unidade'} · ${d.modelo||''}</div>
+   <div class="top"><span class="nome">${d.nome||d.device_id}</span>${pend?'<span class="badge b-old">aguardando</span>':verBadge(d.versao,ALVO)}</div>
+   <div class="uni"><span class="dot" style="background:${pend?'#f59e0b':(onl?'#22c55e':'#cbd5e1')}"></span>${pend?'aguardando instalação':(onl?'online':'offline')} · ${d.unidade||'sem unidade'} · ${d.modelo||''}</div>
+   ${pend?'<div class="kv" style="color:#b45309">Cadastrado — rode o link de instalação no Raspberry.</div>':`
    <div class="kv">IP ${d.ip||'-'} · ${d.status||''} ${d.aferido?'':'· <b style=color:#b45309>não aferido</b>'}</div>
-   <div class="kv">Volumes ${p.volumes||0} · Vol/h ${p.vol_h||0} · Integr. erro ${p.integracao_erro||0}</div>
-  </div>`}).join('')||'<p style="color:#64748b">Nenhum equipamento ainda. Configure o servidor no equipamento (frota.servidor) e aguarde o heartbeat.</p>';
+   <div class="kv">Volumes ${p.volumes||0} · Vol/h ${p.vol_h||0} · Integr. erro ${p.integracao_erro||0}</div>`}
+  </div>`}).join('')||'<p style="color:#64748b">Nenhum equipamento ainda. Clique em “Cadastrar equipamento” para gerar um link de instalação.</p>';
 }
 async function detalhe(id){const d=await getj('/api/device/'+id);const dev=d.device,ev=d.eventos;
  document.getElementById('box').innerHTML=`<h2 style="margin-bottom:8px">${dev.nome||id}</h2>
@@ -86,8 +95,151 @@ async function detalhe(id){const d=await getj('/api/device/'+id);const dev=d.dev
 }
 function fecha(){document.getElementById('modal').style.display='none'}
 async function definirAlvo(){const v=document.getElementById('selVer').value;await post('/api/target',{versao:v});carregar()}
+function abrirCadastro(){
+ document.getElementById('regbox').innerHTML=`
+  <h2 style="margin-bottom:4px">Cadastrar equipamento</h2>
+  <p class="hint" style="margin-bottom:6px">Dê um nome ao equipamento. Vou gerar um link de instalação para rodar no Raspberry via SSH.</p>
+  <label>Nome do equipamento *</label>
+  <input id="regNome" placeholder="ex.: Cubadora Expedição 01">
+  <label>Unidade (opcional)</label>
+  <input id="regUni" placeholder="ex.: CD São Paulo">
+  <div style="margin-top:16px;display:flex;gap:8px">
+   <button onclick="cadastrar()">Gerar link de instalação</button>
+   <button onclick="fechaReg()" style="background:#e2e8f0;color:#0f172a">Cancelar</button>
+  </div>`;
+ document.getElementById('regmodal').style.display='flex';
+ setTimeout(()=>{const e=document.getElementById('regNome');if(e)e.focus()},50);
+}
+function fechaReg(){document.getElementById('regmodal').style.display='none';carregar()}
+async function cadastrar(){
+ const nome=document.getElementById('regNome').value.trim();
+ const unidade=document.getElementById('regUni').value.trim();
+ if(!nome){alert('Informe o nome do equipamento');return}
+ const r=await post('/api/register',{nome,unidade});
+ if(r.erro){alert(r.erro);return}
+ document.getElementById('regbox').innerHTML=`
+  <h2 style="margin-bottom:4px">✅ "${r.nome}" cadastrado</h2>
+  <p class="hint">No Raspberry (via SSH), rode <b>um comando</b> para instalar e conectar este equipamento:</p>
+  <div class="cmd" id="cmdTxt">${r.install_cmd}</div>
+  <button onclick="copiar()">📋 Copiar comando</button>
+  <p class="hint" style="margin-top:14px">
+   • Já aparece no painel como <b>aguardando instalação</b>.<br>
+   • Depois do comando, ele instala, configura e começa a reportar sozinho.<br>
+   • ID: <code>${r.device_id}</code>
+  </p>
+  <div style="margin-top:14px"><button onclick="fechaReg()" style="background:#e2e8f0;color:#0f172a">Fechar</button></div>`;
+}
+function copiar(){const b=event.target;const t=document.getElementById('cmdTxt').textContent;
+ const ok=()=>{const o=b.textContent;b.textContent='✅ Copiado';setTimeout(()=>b.textContent=o,1500)};
+ if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(ok,ok)}else{ok()}}
 carregar();setInterval(carregar,5000);
 </script></body></html>"""
+
+
+# URL do repositório de código do equipamento (clone público no Pi durante a instalação).
+_REPO = os.environ.get("FLEET_REPO", "https://github.com/guilherme-noguiera-ferraz1203/cubadora.git")
+
+# Script de bootstrap servido em GET /install/<device_id>. Roda no Raspberry como:
+#   curl -fsSL https://.../install/<id> | sudo bash
+# Placeholders __X__ são substituídos por _bootstrap_script(); o bash usa $VAR normalmente.
+_BOOTSTRAP = r"""#!/usr/bin/env bash
+# Instalacao automatica da Cubadora — equipamento "__NOME__" (__UNIDADE__).
+# Gerado pelo painel de frota. NAO edite: regenere cadastrando o equipamento de novo.
+set -euo pipefail
+
+SERVIDOR="__SERVIDOR__"
+DEVICE_ID="__DEVICE_ID__"
+NOME="__NOME__"
+UNIDADE="__UNIDADE__"
+REPO="__REPO__"
+
+echo "==================================================================="
+echo " Cubadora — instalacao do equipamento: $NOME"
+echo " Unidade: ${UNIDADE:-(nao informada)} | Servidor: $SERVIDOR"
+echo " ID: $DEVICE_ID"
+echo "==================================================================="
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo "!! Precisa de root. Rode:  curl -fsSL $SERVIDOR/install/$DEVICE_ID | sudo bash" >&2
+  exit 1
+fi
+
+# Usuario/dir alvo (padrao pi, igual ao cubagempi.service). Detecta quem chamou via sudo.
+TARGET_USER="${SUDO_USER:-pi}"
+id "$TARGET_USER" >/dev/null 2>&1 || TARGET_USER="$(id -un)"
+TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
+[ -n "$TARGET_HOME" ] || TARGET_HOME="/home/$TARGET_USER"
+APP_BASE="$TARGET_HOME/cubagem-pi"
+APP_DIR="$APP_BASE/python"
+
+echo ">> Dependencias do sistema (git, python3, pip)..."
+apt-get update -y
+apt-get install -y git python3 python3-pip
+
+# Nunca apaga instalacao anterior: move para um backup com data/hora.
+if [ -e "$APP_DIR" ]; then
+  BKP="$APP_DIR.bak.$(date +%Y%m%d%H%M%S)"
+  echo ">> Instalacao anterior encontrada -> backup em $BKP"
+  mv "$APP_DIR" "$BKP"
+fi
+
+echo ">> Baixando o codigo do equipamento ($REPO)..."
+mkdir -p "$APP_BASE"
+git clone --depth 1 "$REPO" "$APP_DIR"
+chown -R "$TARGET_USER":"$TARGET_USER" "$APP_BASE"
+
+# Torna o install.sh agnostico do usuario (ele tem APP_DIR fixo em /home/pi/...).
+sed -i "s#^APP_DIR=.*#APP_DIR=\"$APP_DIR\"#" "$APP_DIR/deploy/install.sh"
+
+echo ">> Rodando o instalador (deps Python, UART/I2C, kiosk)..."
+sudo -u "$TARGET_USER" bash "$APP_DIR/deploy/install.sh"
+
+echo ">> Gravando identidade e frota no config.yaml..."
+python3 - "$APP_DIR/config.yaml" "$NOME" "$UNIDADE" "$SERVIDOR" "$DEVICE_ID" <<'PY'
+import sys, yaml
+cfg_path, nome, unidade, servidor, device_id = sys.argv[1:6]
+try:
+    with open(cfg_path) as f:
+        cfg = yaml.safe_load(f) or {}
+except FileNotFoundError:
+    cfg = {}
+cfg["nome_equipamento"] = nome
+frota = cfg.get("frota") or {}
+frota.update({"servidor": servidor, "unidade": unidade,
+              "device_id": device_id, "auto_update": True})
+frota.setdefault("heartbeat_segundos", 300)
+cfg["frota"] = frota
+with open(cfg_path, "w") as f:
+    yaml.safe_dump(cfg, f, allow_unicode=True, sort_keys=False)
+print("   config gravado:", cfg_path)
+PY
+chown "$TARGET_USER":"$TARGET_USER" "$APP_DIR/config.yaml"
+
+# A aplicacao roda em modo KIOSK: o install.sh/setup-kiosk.sh ja configurou o auto-start
+# (backend --no-gui na porta 8080 + Chromium em tela cheia) e o heartbeat roda dentro desse
+# backend. NAO habilitamos o servico systemd headless 'cubagempi' aqui: ele brigaria com o
+# kiosk pela porta 8080 e pela serial (sintoma classico: tela piscando / app instavel).
+# Garante que ele fica desligado, mesmo se uma instalacao anterior o tiver habilitado.
+echo ">> Modo de execucao: kiosk (configurado pelo install.sh)."
+systemctl disable --now cubagempi 2>/dev/null || true
+
+echo ""
+echo "==================================================================="
+echo " Pronto! '$NOME' instalado."
+echo " Reinicie para abrir em tela cheia (kiosk):  sudo reboot"
+echo " Apos o reboot, ele reporta sozinho ao painel: $SERVIDOR"
+echo " Manutencao: tecla ESC sai do kiosk."
+echo "==================================================================="
+"""
+
+
+def _bootstrap_script(servidor: str, device_id: str, nome: str, unidade: str) -> str:
+    return (_BOOTSTRAP
+            .replace("__SERVIDOR__", servidor)
+            .replace("__DEVICE_ID__", device_id)
+            .replace("__NOME__", nome)
+            .replace("__UNIDADE__", unidade)
+            .replace("__REPO__", _REPO))
 
 
 def _make_handler(db: FleetDB):
@@ -108,6 +260,12 @@ def _make_handler(db: FleetDB):
         def _read(self):
             n = int(self.headers.get("Content-Length", 0) or 0)
             return self.rfile.read(n) if n else b""
+
+        def _base_url(self):
+            # Atrás do nginx: respeita o domínio e o esquema (https) reais do request.
+            proto = self.headers.get("X-Forwarded-Proto", "http")
+            host = self.headers.get("Host") or self.headers.get("X-Forwarded-Host") or "localhost"
+            return f"{proto}://{host}"
 
         def do_GET(self):
             u = urlparse(self.path)
@@ -131,6 +289,17 @@ def _make_handler(db: FleetDB):
                         self._send(200, f.read(), "application/zip")
                 else:
                     self._json({"erro": "pacote não encontrado"}, 404)
+            elif p.startswith("/install/"):
+                # Público (sem senha): o Pi baixa este script no momento da instalação.
+                device_id = p.rsplit("/", 1)[-1]
+                dev = db.get_device(device_id)
+                if not dev:
+                    self._send(404, b"# Equipamento nao encontrado. Cadastre-o no painel.\n",
+                               "text/plain; charset=utf-8")
+                    return
+                script = _bootstrap_script(self._base_url(), device_id,
+                                           dev.get("nome") or "", dev.get("unidade") or "")
+                self._send(200, script.encode("utf-8"), "text/x-shellscript; charset=utf-8")
             else:
                 self._json({"erro": "not found"}, 404)
 
@@ -145,6 +314,22 @@ def _make_handler(db: FleetDB):
                     self._json({"versao_alvo": db.get_config("versao_alvo")})
                 except Exception as exc:  # noqa: BLE001
                     self._json({"erro": str(exc)}, 500)
+            elif p.startswith("/api/register"):
+                # Protegido pela senha do painel (nginx). Cadastra um equipamento e devolve o link.
+                body = json.loads(self._read().decode("utf-8") or "{}")
+                nome = (body.get("nome") or "").strip()
+                unidade = (body.get("unidade") or "").strip()
+                if not nome:
+                    self._json({"erro": "informe o nome do equipamento"}, 400)
+                    return
+                device_id = "pi-" + secrets.token_hex(5)
+                db.create_pending_device(device_id, nome, unidade)
+                base = self._base_url()
+                install_url = f"{base}/install/{device_id}"
+                log.info("Equipamento cadastrado: %s (%s) device_id=%s", nome, unidade, device_id)
+                self._json({"device_id": device_id, "nome": nome, "unidade": unidade,
+                            "install_url": install_url,
+                            "install_cmd": f"curl -fsSL {install_url} | sudo bash"})
             elif p.startswith("/api/target"):
                 versao = json.loads(self._read().decode("utf-8") or "{}").get("versao", "")
                 db.set_config("versao_alvo", versao)

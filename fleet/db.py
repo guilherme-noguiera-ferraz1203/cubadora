@@ -87,6 +87,21 @@ class FleetDB:
         d["producao"] = json.loads(d.get("producao") or "{}")
         return d
 
+    def create_pending_device(self, device_id: str, nome: str, unidade: str) -> bool:
+        """Pré-cadastra um equipamento. Ele aparece no painel como 'aguardando instalação'
+        (last_seen NULL) até o primeiro heartbeat. Retorna False se o device_id já existir."""
+        agora = datetime.now().isoformat()
+        with self._lock:
+            existe = self._conn.execute("SELECT device_id FROM device WHERE device_id=?",
+                                        (device_id,)).fetchone()
+            if existe:
+                return False
+            self._conn.execute(
+                "INSERT INTO device (device_id,nome,unidade,primeiro_seen) VALUES (?,?,?,?)",
+                (device_id, nome, unidade, agora))
+            self._conn.commit()
+        return True
+
     # --------------------------------------------------------------- events
     def add_events(self, device_id: str, eventos: list[dict]) -> None:
         if not eventos:

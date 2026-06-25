@@ -2,6 +2,12 @@
 # Inicia a cubadora em modo kiosk: backend (headless) + navegador em TELA CHEIA.
 # Funciona em X11 e Wayland (Bullseye/Bookworm), Pi 3/4/5.
 
+# Instância única: o autostart pode disparar em mais de um lugar (XDG .desktop + labwc/wayfire).
+# Sem isto, dois backends sobem ao mesmo tempo e brigam pela serial (GPIO busy) e pela porta 8080
+# -> tela piscando. O flock garante que só o primeiro kiosk-run.sh siga adiante.
+exec 9>/tmp/cubagem-kiosk.lock
+flock -n 9 || { echo "[kiosk] ja em execucao; saindo."; exit 0; }
+
 APP="/home/pi/cubagem-pi/python"
 CFG="$APP/config.yaml"
 export DISPLAY="${DISPLAY:-:0}"

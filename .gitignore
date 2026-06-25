@@ -14,6 +14,9 @@ bkp/
 config.yaml
 cfg_*.yaml
 
+# Override de compose específico do servidor/VPS (não versionar)
+docker-compose.override.yml
+
 # Build de documentos e pacotes
 _docbuild/node_modules/
 _docbuild/package*.json
