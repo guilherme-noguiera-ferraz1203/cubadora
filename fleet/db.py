@@ -34,6 +34,17 @@ CREATE TABLE IF NOT EXISTS fleet_config (
     chave TEXT PRIMARY KEY,
     valor TEXT
 );
+CREATE TABLE IF NOT EXISTS command (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    device_id   TEXT,
+    tipo        TEXT,
+    parametros  TEXT,
+    status      TEXT DEFAULT 'pendente',
+    resultado   TEXT,
+    criado_em   TEXT,
+    enviado_em  TEXT,
+    ack_em      TEXT
+);
 """
 
 
@@ -119,6 +130,54 @@ class FleetDB:
                 "SELECT nivel,mensagem,data FROM event WHERE device_id=? ORDER BY id DESC LIMIT ?",
                 (device_id, limit)).fetchall()
         return [dict(r) for r in rows]
+
+    # --------------------------------------------------------------- commands
+    def add_command(self, device_id: str, tipo: str, parametros: dict | None = None) -> int:
+        """Enfileira um comando para o equipamento. Retorna o id do comando."""
+        agora = datetime.now().isoformat()
+        with self._lock:
+            cur = self._conn.execute(
+                "INSERT INTO command (device_id,tipo,parametros,status,criado_em) VALUES (?,?,?,?,?)",
+                (device_id, tipo, json.dumps(parametros or {}), "pendente", agora))
+            self._conn.commit()
+            return cur.lastrowid
+
+    def pull_commands(self, device_id: str) -> list[dict]:
+        """Entrega os comandos pendentes do equipamento e os marca como 'enviado' (entrega única,
+        evita reexecução/loop em comandos destrutivos). Resultado vem depois via ack_command()."""
+        agora = datetime.now().isoformat()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id,tipo,parametros FROM command WHERE device_id=? AND status='pendente' ORDER BY id",
+                (device_id,)).fetchall()
+            if rows:
+                ids = [r["id"] for r in rows]
+                self._conn.execute(
+                    "UPDATE command SET status='enviado', enviado_em=? WHERE id IN (%s)"
+                    % ",".join("?" * len(ids)), [agora, *ids])
+                self._conn.commit()
+        return [{"id": r["id"], "tipo": r["tipo"], "parametros": json.loads(r["parametros"] or "{}")} for r in rows]
+
+    def ack_command(self, command_id: int, status: str, resultado: str = "") -> None:
+        """Registra o resultado de um comando reportado pelo equipamento."""
+        agora = datetime.now().isoformat()
+        with self._lock:
+            self._conn.execute(
+                "UPDATE command SET status=?, resultado=?, ack_em=? WHERE id=?",
+                (status or "executado", resultado, agora, command_id))
+            self._conn.commit()
+
+    def list_commands(self, device_id: str, limit: int = 15) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id,tipo,parametros,status,resultado,criado_em,ack_em FROM command "
+                "WHERE device_id=? ORDER BY id DESC LIMIT ?", (device_id, limit)).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["parametros"] = json.loads(d.get("parametros") or "{}")
+            out.append(d)
+        return out
 
     # --------------------------------------------------------------- target
     def set_config(self, chave: str, valor: str) -> None:

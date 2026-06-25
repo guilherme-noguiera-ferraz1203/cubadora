@@ -24,7 +24,7 @@ def versoes_disponiveis() -> list[str]:
     return sorted(f[:-4] for f in os.listdir(_PKG_DIR) if f.endswith(".zip"))
 
 
-_PAGE = """<!doctype html><html lang=pt-BR><head><meta charset=utf-8>
+_PAGE = r"""<!doctype html><html lang=pt-BR><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1"><title>Frota — Cubagem</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',system-ui,Arial,sans-serif}
@@ -85,16 +85,56 @@ async function carregar(){
    <div class="kv">Volumes ${p.volumes||0} · Vol/h ${p.vol_h||0} · Integr. erro ${p.integracao_erro||0}</div>`}
   </div>`}).join('')||'<p style="color:#64748b">Nenhum equipamento ainda. Clique em “Cadastrar equipamento” para gerar um link de instalação.</p>';
 }
-async function detalhe(id){const d=await getj('/api/device/'+id);const dev=d.device,ev=d.eventos;
- document.getElementById('box').innerHTML=`<h2 style="margin-bottom:8px">${dev.nome||id}</h2>
-  <div style="color:#64748b;margin-bottom:12px">${dev.unidade||'sem unidade'} · ${dev.modelo||''} · versão ${dev.versao||'?'} · visto ${(dev.last_seen||'').replace('T',' ').substr(0,19)}</div>
-  <h3 style="margin:10px 0 6px">Últimos avisos e erros</h3>
-  ${ev.length?ev.map(e=>`<div class="ev"><span class="${e.nivel==='WARNING'?'warn':'err'}">[${e.nivel}]</span> ${e.mensagem} <span style="color:#94a3b8">(${(e.data||'').replace('T',' ').substr(0,19)})</span></div>`).join(''):'<p style="color:#64748b">Sem eventos registrados.</p>'}
-  <div style="margin-top:14px"><button onclick="fecha()">Fechar</button></div>`;
+function esc(s){return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function nivelPt(n){return {WARNING:'Aviso',ERROR:'Erro',CRITICAL:'Crítico',INFO:'Info',DEBUG:'Debug'}[n]||n}
+function limparMsg(m){let s=(m||'').split('\n')[0].trim();return s.replace(/^\d{2}:\d{2}:\d{2}\s+\w+\s+\[[^\]]+\]\s*/,'')}
+function resumirEventos(ev){
+ if(!ev||!ev.length) return '<p style="color:#15803d">✓ Tudo certo — sem avisos nem erros recentes.</p>';
+ const g=[];ev.forEach(e=>{const msg=limparMsg(e.mensagem),nivel=e.nivel,u=g[g.length-1];if(u&&u.msg===msg&&u.nivel===nivel){u.n++;u.data=e.data}else g.push({msg,nivel,data:e.data,n:1})});
+ return g.slice(0,40).map(x=>`<div class="ev"><span class="${x.nivel==='WARNING'?'warn':'err'}">${nivelPt(x.nivel)}</span> ${esc(x.msg)}${x.n>1?` <b>×${x.n}</b>`:''} <span style="color:#94a3b8">${(x.data||'').replace('T',' ').substr(11,8)}</span></div>`).join('');
+}
+function statusCmd(s){return {pendente:'⏳ na fila',enviado:'📨 enviado',executado:'✅ ok',erro:'❌ erro'}[s]||s}
+async function cmd(id,tipo,parametros){
+ if((tipo==='reboot'||tipo==='shutdown')&&!confirm('Confirmar '+tipo+' no equipamento?'))return;
+ const r=await post('/api/command',{device_id:id,tipo,parametros:parametros||{}});
+ if(r&&r.erro){alert('Erro: '+r.erro);return}
+ setTimeout(()=>detalhe(id),1500);
+}
+async function cmdTexto(id){const t=document.getElementById('cmdtxt').value.trim();if(t)await cmd(id,'comando',{texto:t})}
+async function cmdConfig(id){const sec=document.getElementById('cfgsec').value.trim();let dd={};try{dd=JSON.parse(document.getElementById('cfgdados').value||'{}')}catch(e){alert('JSON inválido em Dados');return}if(sec)await cmd(id,'config',{secao:sec,dados:dd})}
+async function detalhe(id){const d=await getj('/api/device/'+id);const dev=d.device,ev=d.eventos||[],cmds=d.comandos||[];const onl=online(dev.last_seen);
+ document.getElementById('box').innerHTML=`<h2 style="margin-bottom:4px">${esc(dev.nome||id)}</h2>
+  <div style="color:#64748b;margin-bottom:6px"><span class="dot" style="background:${onl?'#22c55e':'#cbd5e1'}"></span>${onl?'online':'offline'} · ${esc(dev.unidade||'sem unidade')} · ${esc(dev.modelo||'')} · versão ${esc(dev.versao||'?')} · visto ${(dev.last_seen||'').replace('T',' ').substr(0,19)}</div>
+
+  <h3 style="margin:12px 0 6px">Controles</h3>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+   <button onclick="cmd('${id}','restart_app')" style="background:#f59e0b">⚡ Reiniciar app</button>
+   <button onclick="cmd('${id}','update')" style="background:#2563eb">⬆️ Atualizar agora</button>
+   <button onclick="cmd('${id}','reboot')" style="background:#dc2626">🔄 Reiniciar equipamento</button>
+   <button onclick="cmd('${id}','shutdown')" style="background:#475569">⏻ Desligar</button>
+  </div>
+  ${onl?'':'<div class="hint" style="color:#b45309;margin-top:6px">Offline — o comando fica na fila e roda quando reconectar.</div>'}
+
+  <h3 style="margin:14px 0 6px">Comando manual</h3>
+  <div style="display:flex;gap:8px"><input id="cmdtxt" placeholder="texto do dispatcher (ex.: *tara*, *r*, *config*)" style="flex:1"><button onclick="cmdTexto('${id}')">Enviar</button></div>
+
+  <h3 style="margin:14px 0 6px">Configuração remota</h3>
+  <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+   <div style="width:150px"><label>Seção</label><input id="cfgsec" placeholder="ex.: frota"></div>
+   <div style="flex:1;min-width:200px"><label>Dados (JSON)</label><input id="cfgdados" placeholder='{"heartbeat_segundos":10}'></div>
+   <button onclick="cmdConfig('${id}')">Aplicar</button>
+  </div>
+
+  ${cmds.length?`<h3 style="margin:14px 0 6px">Comandos recentes</h3>${cmds.map(c=>`<div class="ev">${statusCmd(c.status)} <b>${esc(c.tipo)}</b>${c.parametros&&c.parametros.texto?' '+esc(c.parametros.texto):''}${c.resultado?' — '+esc(c.resultado):''} <span style="color:#94a3b8">${(c.ack_em||c.criado_em||'').replace('T',' ').substr(11,8)}</span></div>`).join('')}`:''}
+
+  <h3 style="margin:14px 0 6px">Atividade (avisos e erros)</h3>
+  ${resumirEventos(ev)}
+
+  <div style="margin-top:16px"><button onclick="fecha()" style="background:#e2e8f0;color:#0f172a">Fechar</button></div>`;
  document.getElementById('modal').style.display='flex';
 }
 function fecha(){document.getElementById('modal').style.display='none'}
-async function definirAlvo(){const v=document.getElementById('selVer').value;await post('/api/target',{versao:v});carregar()}
+async function definirAlvo(){const v=document.getElementById('selVer').value;if(!v||v==='(sem pacotes)'){alert('Nenhuma versão publicada para definir como alvo.');return}await post('/api/target',{versao:v});carregar()}
 function abrirCadastro(){
  document.getElementById('regbox').innerHTML=`
   <h2 style="margin-bottom:4px">Cadastrar equipamento</h2>
@@ -207,7 +247,7 @@ cfg["nome_equipamento"] = nome
 frota = cfg.get("frota") or {}
 frota.update({"servidor": servidor, "unidade": unidade,
               "device_id": device_id, "auto_update": True})
-frota.setdefault("heartbeat_segundos", 300)
+frota["heartbeat_segundos"] = 10
 cfg["frota"] = frota
 with open(cfg_path, "w") as f:
     yaml.safe_dump(cfg, f, allow_unicode=True, sort_keys=False)
@@ -277,7 +317,8 @@ def _make_handler(db: FleetDB):
             elif p.startswith("/api/device/"):
                 did = p.rsplit("/", 1)[-1]
                 dev = db.get_device(did)
-                self._json({"device": dev, "eventos": db.get_events(did, 100)} if dev else {"erro": "não encontrado"},
+                self._json({"device": dev, "eventos": db.get_events(did, 100),
+                            "comandos": db.list_commands(did, 15)} if dev else {"erro": "não encontrado"},
                            200 if dev else 404)
             elif p.startswith("/api/versions"):
                 self._json({"alvo": db.get_config("versao_alvo"), "disponiveis": versoes_disponiveis()})
@@ -309,11 +350,29 @@ def _make_handler(db: FleetDB):
             if p.startswith("/api/heartbeat"):
                 try:
                     payload = json.loads(self._read().decode("utf-8") or "{}")
+                    did = payload.get("device_id", "")
                     db.upsert_device(payload)
-                    db.add_events(payload.get("device_id", ""), payload.get("eventos", []))
-                    self._json({"versao_alvo": db.get_config("versao_alvo")})
+                    db.add_events(did, payload.get("eventos", []))
+                    # ACK: resultados dos comandos executados pelo equipamento
+                    for r in payload.get("comandos_resultado", []) or []:
+                        if r.get("id") is not None:
+                            db.ack_command(r["id"], r.get("status", "executado"), str(r.get("resultado", "")))
+                    # Entrega os comandos pendentes deste equipamento (entrega única)
+                    comandos = db.pull_commands(did) if did else []
+                    self._json({"versao_alvo": db.get_config("versao_alvo"), "comandos": comandos})
                 except Exception as exc:  # noqa: BLE001
                     self._json({"erro": str(exc)}, 500)
+            elif p.startswith("/api/command"):
+                # Protegido pela senha do painel (nginx). Enfileira um comando para o equipamento.
+                body = json.loads(self._read().decode("utf-8") or "{}")
+                did = (body.get("device_id") or "").strip()
+                tipo = (body.get("tipo") or "").strip()
+                if not did or not tipo:
+                    self._json({"erro": "informe device_id e tipo"}, 400)
+                    return
+                cid = db.add_command(did, tipo, body.get("parametros") or {})
+                log.info("Comando enfileirado: %s para %s (id=%s)", tipo, did, cid)
+                self._json({"command_id": cid, "status": "pendente"})
             elif p.startswith("/api/register"):
                 # Protegido pela senha do painel (nginx). Cadastra um equipamento e devolve o link.
                 body = json.loads(self._read().decode("utf-8") or "{}")
@@ -331,7 +390,9 @@ def _make_handler(db: FleetDB):
                             "install_url": install_url,
                             "install_cmd": f"curl -fsSL {install_url} | sudo bash"})
             elif p.startswith("/api/target"):
-                versao = json.loads(self._read().decode("utf-8") or "{}").get("versao", "")
+                versao = (json.loads(self._read().decode("utf-8") or "{}").get("versao", "") or "").strip()
+                if versao == "(sem pacotes)":
+                    versao = ""   # placeholder do dropdown: nunca vira alvo
                 db.set_config("versao_alvo", versao)
                 self._json({"versao_alvo": versao})
             elif p.startswith("/api/publish"):

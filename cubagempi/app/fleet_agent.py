@@ -1,8 +1,10 @@
-"""Agente de frota: reporta ao painel central (heartbeat) e aplica a versão-alvo.
+"""Agente de frota: reporta ao painel central (heartbeat), aplica a versão-alvo
+e executa comandos remotos enviados pelo painel.
 
-A cada `heartbeat_segundos`, o equipamento envia ao servidor: identidade, unidade, versão,
-status, produção e os eventos/erros novos. O servidor responde com a versão-alvo; se houver
-versão nova e `auto_update` estiver ligado, o equipamento baixa, aplica e reinicia sozinho.
+A cada ciclo, o equipamento envia ao servidor: identidade, unidade, versão, status, produção,
+os eventos/erros novos e o resultado dos comandos executados desde o último heartbeat. O servidor
+responde com a versão-alvo e a lista de comandos pendentes; o equipamento executa cada um e reporta
+o resultado no próximo heartbeat.
 
 Pull-based: só o servidor precisa de endereço fixo; os equipamentos podem estar em redes/unidades
 diferentes, atrás de NAT.
@@ -13,13 +15,16 @@ from __future__ import annotations
 import json
 import logging
 import threading
-import time
 import urllib.request
 
 from .. import __version__ as SW_VERSION
 from ..core.log_buffer import get_log_buffer
 
 log = logging.getLogger(__name__)
+
+# Comandos que derrubam/reiniciam o processo: o resultado é reportado ANTES de executar,
+# senão o processo morre antes de conseguir avisar o painel.
+_DESTRUTIVOS = {"reboot", "shutdown", "restart_app", "update"}
 
 
 class FleetAgent:
@@ -28,13 +33,15 @@ class FleetAgent:
         self.cfg = app.config.frota
         self._stop = threading.Event()
         self._ultimo_seq = 0
+        self._executados: set = set()   # ids de comandos já executados (dedup)
+        self._resultados: list = []     # resultados pendentes de reportar ao painel
 
     def start(self) -> None:
         if not self.cfg.servidor:
             log.info("Frota: sem servidor configurado; agente desativado.")
             return
         threading.Thread(target=self._loop, name="fleet-agent", daemon=True).start()
-        log.info("Frota: agente ativo (servidor=%s, intervalo=%ds)", self.cfg.servidor, self.cfg.heartbeat_segundos)
+        log.info("Frota: agente ativo (servidor=%s)", self.cfg.servidor)
 
     def stop(self) -> None:
         self._stop.set()
@@ -58,16 +65,25 @@ class FleetAgent:
             "integracao": self.app.nome_integracao(),
             "producao": self.app.producao_dict(),
             "eventos": self._coletar_eventos(),
+            "comandos_resultado": list(self._resultados),  # ACK dos comandos executados
         }
 
     def heartbeat(self) -> dict | None:
         url = self.cfg.servidor.rstrip("/") + "/api/heartbeat"
+        enviados = list(self._resultados)
         body = json.dumps(self._payload()).encode("utf-8")
         try:
             req = urllib.request.Request(url, data=body,
                                          headers={"Content-Type": "application/json"}, method="POST")
             with urllib.request.urlopen(req, timeout=10) as resp:
-                return json.loads(resp.read().decode("utf-8") or "{}")
+                data = json.loads(resp.read().decode("utf-8") or "{}")
+            # entregue com sucesso -> remove os resultados que foram reportados
+            for r in enviados:
+                try:
+                    self._resultados.remove(r)
+                except ValueError:
+                    pass
+            return data
         except Exception as exc:  # noqa: BLE001
             log.debug("Frota: heartbeat falhou (%s)", exc)
             return None
@@ -78,11 +94,57 @@ class FleetAgent:
             log.warning("Frota: versão-alvo %s difere da atual %s; atualizando...", alvo, SW_VERSION)
             self.app.atualizacao.aplicar_versao(self.cfg.servidor, alvo)  # baixa, aplica e reinicia
 
+    def _executar_comando(self, tipo: str, par: dict) -> str:
+        """Mapeia um comando do painel para uma ação no equipamento. Retorna a mensagem de resultado."""
+        try:
+            if tipo == "reboot":
+                return self.app.acao_sistema("reboot")
+            if tipo == "shutdown":
+                return self.app.acao_sistema("shutdown")
+            if tipo == "restart_app":
+                # Reinicia a aplicação no lugar (os.execv) — funciona em kiosk e em systemd.
+                self.app.atualizacao.reiniciar()
+                return "Reiniciando aplicação"
+            if tipo == "update":
+                return self.app.atualizar()
+            if tipo == "config":
+                return self.app.atualizar_config(par.get("secao", ""), par.get("dados", {}) or {})
+            if tipo == "comando":
+                # Acesso a TODOS os comandos do dispatcher (tara, calibrar, integração, etc.)
+                return self.app.dispatcher.execute(par.get("texto", ""))
+            return f"Comando desconhecido: {tipo}"
+        except Exception as exc:  # noqa: BLE001
+            log.exception("Frota: falha ao executar comando %s", tipo)
+            return f"erro: {exc}"
+
+    def _processar_comandos(self, resposta: dict) -> None:
+        comandos = (resposta or {}).get("comandos") or []
+        for cmd in comandos:
+            cid = cmd.get("id")
+            if cid is None or cid in self._executados:
+                continue
+            self._executados.add(cid)
+            tipo = cmd.get("tipo", "")
+            par = cmd.get("parametros") or {}
+            log.warning("Frota: executando comando remoto #%s (%s)", cid, tipo)
+            if tipo in _DESTRUTIVOS:
+                # reporta ANTES de executar (o processo vai cair/reiniciar)
+                self._resultados.append({"id": cid, "status": "executado", "resultado": f"executando {tipo}"})
+                self.heartbeat()
+            res = self._executar_comando(tipo, par)
+            self._resultados.append({"id": cid, "status": "executado", "resultado": str(res)[:500]})
+
+    def _intervalo(self) -> float:
+        # Responsivo para controle remoto: no máximo 10s entre ciclos, respeitando valores menores.
+        hb = self.cfg.heartbeat_segundos or 10
+        return max(5, min(hb, 10))
+
     def _loop(self) -> None:
         # primeiro heartbeat logo após subir, depois no intervalo
-        time.sleep(5)
+        self._stop.wait(5)
         while not self._stop.is_set():
             resp = self.heartbeat()
             if resp is not None:
                 self._verificar_update(resp)
-            self._stop.wait(max(30, self.cfg.heartbeat_segundos))
+                self._processar_comandos(resp)
+            self._stop.wait(self._intervalo())
