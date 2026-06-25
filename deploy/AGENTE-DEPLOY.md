@@ -20,14 +20,23 @@ whoami
 Esperado: versões do Docker/Compose/NGINX impressas. Se faltar Docker ou Compose, instale antes.
 
 ## 1. Obter o código
+Repositório: **`guilherme-noguiera-ferraz1203/cubadora`** (GitHub, privado).
 ```bash
 sudo mkdir -p /opt/cubagem-fleet
 sudo chown "$USER":"$USER" /opt/cubagem-fleet
-git clone <URL_DO_REPOSITORIO_GIT> /opt/cubagem-fleet
+git clone git@github.com:guilherme-noguiera-ferraz1203/cubadora.git /opt/cubagem-fleet
 cd /opt/cubagem-fleet
 ```
-> O repositório tem o `Dockerfile`, `docker-compose.yml` e a pasta `fleet/` na raiz.
+> O `Dockerfile`, `docker-compose.yml` e a pasta `fleet/` estão na raiz do repositório.
 > Se já existir, atualize com `git -C /opt/cubagem-fleet pull` em vez de clonar.
+
+**Acesso ao repositório (é privado):** o agente precisa de leitura. Use UMA destas opções:
+- **Deploy key (recomendado):** na VPS, gere `ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ""`,
+  e adicione o conteúdo de `~/.ssh/id_ed25519.pub` em
+  *GitHub → repo cubadora → Settings → Deploy keys → Add* (somente leitura). Aí o `git clone` por
+  SSH (acima) funciona.
+- **HTTPS com token:** `git clone https://<TOKEN>@github.com/guilherme-noguiera-ferraz1203/cubadora.git /opt/cubagem-fleet`.
+- **Tornar o repo público** (não há segredos no código; `config.yaml` é ignorado) — aí clona direto.
 
 ## 2. Subir o container
 ```bash
