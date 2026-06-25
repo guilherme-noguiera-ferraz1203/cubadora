@@ -428,9 +428,8 @@ def _make_handler(db: FleetDB):
                 os.makedirs(_PKG_DIR, exist_ok=True)
                 with open(os.path.join(_PKG_DIR, versao + ".zip"), "wb") as f:
                     f.write(self._read())
-                db.set_config("versao_alvo", versao)
-                log.info("Publicada versão %s (alvo da frota)", versao)
-                self._json({"mensagem": f"Versão {versao} publicada e definida como alvo"})
+                log.info("Publicada versão %s (disponível para selecionar nos equipamentos)", versao)
+                self._json({"mensagem": f"Versão {versao} publicada", "versao": versao})
             else:
                 self._json({"erro": "not found"}, 404)
 
