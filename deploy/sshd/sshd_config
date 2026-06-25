@@ -6,6 +6,9 @@ PasswordAuthentication no
 PubkeyAuthentication yes
 KbdInteractiveAuthentication no
 AuthorizedKeysFile /tunnel-keys/authorized_keys
+# Host keys em volume persistente (sobrevivem a rebuilds -> Pi nao vai dar "host key changed")
+HostKey /etc/ssh/host_keys/ssh_host_ed25519_key
+HostKey /etc/ssh/host_keys/ssh_host_rsa_key
 AllowTcpForwarding yes
 GatewayPorts clientspecified
 X11Forwarding no

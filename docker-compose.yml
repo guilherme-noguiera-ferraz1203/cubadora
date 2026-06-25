@@ -24,3 +24,5 @@ services:
     volumes:
       # authorized_keys gerenciado pelo fleet (RO no sshd, RW no fleet)
       - ./tunnel-keys:/tunnel-keys:ro
+      # Host keys persistentes (sobrevivem a rebuilds; Pi nao vai dar "host key changed")
+      - ./sshd-host-keys:/etc/ssh/host_keys
