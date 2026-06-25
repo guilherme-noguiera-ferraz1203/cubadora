@@ -259,7 +259,12 @@ def _rewrite_authorized_keys(db) -> int:
     with open(_TUNNEL_KEYS, "w") as f:
         f.writelines(linhas)
     try:
-        os.chmod(_TUNNEL_KEYS, 0o600)
+        # sshd no container roda como user 'tunnel' (uid 1000) e precisa ler o arquivo;
+        # o arquivo é gravado pelo fleet (root). 0644 = sshd consegue ler; chave nao tem
+        # segredo (so identifica o Pi), entao publico ler nao e problema.
+        os.chmod(_TUNNEL_KEYS, 0o644)
+        d = os.path.dirname(_TUNNEL_KEYS)
+        if d: os.chmod(d, 0o755)
     except OSError:
         pass
     return len(linhas)
