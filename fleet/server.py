@@ -54,10 +54,8 @@ button{background:#2563eb;color:#fff;border:none;cursor:pointer;font-weight:600}
 </style></head><body>
 <h1>Frota de equipamentos</h1><div class="sub" id="resumo">—</div>
 <div class="bar">
- <b>Versão alvo:</b> <span class="badge b-ok" id="alvo">—</span>
- <select id="selVer"></select>
- <button onclick="definirAlvo()">Definir versão alvo (atualiza todos)</button>
- <span style="color:#64748b;font-size:13px">Publique novas versões com <code>deploy/publish.py</code>.</span>
+ <b>Versões publicadas:</b> <span class="badge b-ok" id="nver">0</span>
+ <span style="color:#64748b;font-size:13px">Publique com <code>deploy/publish.py</code>. Para atualizar/rollback, clique no equipamento.</span>
  <button onclick="abrirCadastro()" style="background:#16a34a;margin-left:auto">➕ Cadastrar equipamento</button>
 </div>
 <div class="grid" id="grid"></div>
@@ -71,17 +69,16 @@ function idadeSeg(last){if(!last)return Infinity;return (Date.now()-new Date(las
 function online(last){return idadeSeg(last)<35}
 function hatempo(last){const s=idadeSeg(last);if(!isFinite(s))return 'nunca visto';if(s<60)return 'há '+Math.round(s)+'s';if(s<3600)return 'há '+Math.round(s/60)+'min';if(s<86400)return 'há '+Math.round(s/3600)+'h';return 'há '+Math.round(s/86400)+'d'}
 function verBadge(v,alvo){if(!v)return '<span class="badge b-off">?</span>';return v===alvo?'<span class="badge b-ok">'+v+'</span>':'<span class="badge b-old">'+v+' ↑</span>'}
-let ALVO='';
+let VERSOES=[];
 async function carregar(){
- const vs=await getj('/api/versions');ALVO=vs.alvo||'';
- document.getElementById('alvo').textContent=ALVO||'(nenhuma)';
- document.getElementById('selVer').innerHTML=vs.disponiveis.map(v=>'<option '+(v===ALVO?'selected':'')+'>'+v+'</option>').join('')||'<option>(sem pacotes)</option>';
+ const vs=await getj('/api/versions');VERSOES=vs.disponiveis||[];
+ document.getElementById('nver').textContent=VERSOES.length;
  const ds=await getj('/api/devices');
  let on=0;ds.forEach(d=>{if(online(d.last_seen))on++});
  document.getElementById('resumo').textContent=ds.length+' equipamento(s) · '+on+' online · '+(ds.length-on)+' offline';
  document.getElementById('grid').innerHTML=ds.map(d=>{const p=d.producao||{};const onl=online(d.last_seen);const pend=!d.last_seen;
   return `<div class="dev" onclick="detalhe('${d.device_id}')">
-   <div class="top"><span class="nome">${d.nome||d.device_id}</span>${pend?'<span class="badge b-old">aguardando</span>':verBadge(d.versao,ALVO)}</div>
+   <div class="top"><span class="nome">${d.nome||d.device_id}</span>${pend?'<span class="badge b-old">aguardando</span>':verBadge(d.versao,d.versao_alvo)}</div>
    <div class="uni"><span class="dot" style="background:${pend?'#f59e0b':(onl?'#22c55e':'#cbd5e1')}"></span>${pend?'aguardando instalação':'<b style="color:'+(onl?'#15803d':'#64748b')+'">'+(onl?'online':'offline')+'</b> · visto '+hatempo(d.last_seen)} · ${d.unidade||'sem unidade'} · ${d.modelo||''}</div>
    ${pend?'<div class="kv" style="color:#b45309">Cadastrado — rode o link de instalação no Raspberry.</div>':`
    <div class="kv">IP ${d.ip||'-'} · ${d.status||''} ${d.aferido?'':'· <b style=color:#b45309>não aferido</b>'}</div>
@@ -106,8 +103,18 @@ async function cmd(id,tipo,parametros){
 async function cmdTexto(id){const t=document.getElementById('cmdtxt').value.trim();if(t)await cmd(id,'comando',{texto:t})}
 async function cmdConfig(id){const sec=document.getElementById('cfgsec').value.trim();let dd={};try{dd=JSON.parse(document.getElementById('cfgdados').value||'{}')}catch(e){alert('JSON inválido em Dados');return}if(sec)await cmd(id,'config',{secao:sec,dados:dd})}
 async function detalhe(id){const d=await getj('/api/device/'+id);const dev=d.device,ev=d.eventos||[],cmds=d.comandos||[];const onl=online(dev.last_seen);
+ const optsVer=['<option value="">(não atualizar)</option>'].concat(VERSOES.map(v=>'<option value="'+v+'"'+(v===(dev.versao_alvo||'')?' selected':'')+'>'+v+'</option>')).join('');
  document.getElementById('box').innerHTML=`<h2 style="margin-bottom:4px">${esc(dev.nome||id)}</h2>
   <div style="color:#64748b;margin-bottom:6px"><span class="dot" style="background:${onl?'#22c55e':'#cbd5e1'}"></span><b style="color:${onl?'#15803d':'#64748b'}">${onl?'online':'offline'}</b> · visto ${hatempo(dev.last_seen)} · ${esc(dev.unidade||'sem unidade')} · ${esc(dev.modelo||'')} · versão ${esc(dev.versao||'?')}</div>
+
+  <h3 style="margin:12px 0 6px">Versão &amp; atualização</h3>
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+   <span>atual: <b>${esc(dev.versao||'?')}</b></span>
+   <span style="color:#64748b">alvo: ${dev.versao_alvo?esc(dev.versao_alvo):'(nenhum)'}</span>
+   <select id="selVerDev">${optsVer}</select>
+   <button onclick="setVersao('${id}')" style="background:#2563eb">Aplicar (update/rollback)</button>
+  </div>
+  ${VERSOES.length?'':'<div class="hint" style="margin-top:4px">Nenhuma versão publicada ainda — publique com <code>deploy/publish.py</code>.</div>'}
 
   <h3 style="margin:12px 0 6px">Controles</h3>
   <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -137,7 +144,10 @@ async function detalhe(id){const d=await getj('/api/device/'+id);const dev=d.dev
  document.getElementById('modal').style.display='flex';
 }
 function fecha(){document.getElementById('modal').style.display='none'}
-async function definirAlvo(){const v=document.getElementById('selVer').value;if(!v||v==='(sem pacotes)'){alert('Nenhuma versão publicada para definir como alvo.');return}await post('/api/target',{versao:v});carregar()}
+async function setVersao(id){const v=document.getElementById('selVerDev').value;
+ const msg=v?('Aplicar a versão '+v+' neste equipamento? Ele atualiza no próximo heartbeat.'):'Desligar a atualização deste equipamento (não atualizar)?';
+ if(!confirm(msg))return;
+ await post('/api/target',{device_id:id,versao:v});setTimeout(()=>detalhe(id),1000)}
 function abrirCadastro(){
  document.getElementById('regbox').innerHTML=`
   <h2 style="margin-bottom:4px">Cadastrar equipamento</h2>
@@ -323,11 +333,8 @@ def _make_handler(db: FleetDB):
                             "comandos": db.list_commands(did, 15)} if dev else {"erro": "não encontrado"},
                            200 if dev else 404)
             elif p.startswith("/api/versions"):
-                disp = versoes_disponiveis()
-                alvo = db.get_config("versao_alvo")
-                if alvo and alvo not in disp:
-                    alvo = ""
-                self._json({"alvo": alvo, "disponiveis": disp})
+                # Lista de versões publicadas (gravadas na plataforma p/ update/rollback por equipamento).
+                self._json({"disponiveis": versoes_disponiveis()})
             elif p.startswith("/api/package/"):
                 versao = p.rsplit("/", 1)[-1]
                 caminho = os.path.join(_PKG_DIR, versao + ".zip")
@@ -365,8 +372,9 @@ def _make_handler(db: FleetDB):
                             db.ack_command(r["id"], r.get("status", "executado"), str(r.get("resultado", "")))
                     # Entrega os comandos pendentes deste equipamento (entrega única)
                     comandos = db.pull_commands(did) if did else []
-                    # Trava: só manda atualizar para uma versão que TEM pacote (nunca lixo/placeholder).
-                    alvo = db.get_config("versao_alvo")
+                    # Versão-alvo POR equipamento; só entrega se houver pacote (nunca lixo/placeholder).
+                    dev = db.get_device(did)
+                    alvo = (dev or {}).get("versao_alvo") or ""
                     if alvo and alvo not in versoes_disponiveis():
                         alvo = ""
                     self._json({"versao_alvo": alvo, "comandos": comandos})
@@ -400,11 +408,18 @@ def _make_handler(db: FleetDB):
                             "install_url": install_url,
                             "install_cmd": f"curl -fsSL {install_url} | sudo bash"})
             elif p.startswith("/api/target"):
-                versao = (json.loads(self._read().decode("utf-8") or "{}").get("versao", "") or "").strip()
+                # Versão-alvo POR equipamento (update/rollback de UM equipamento).
+                body = json.loads(self._read().decode("utf-8") or "{}")
+                did = (body.get("device_id") or "").strip()
+                versao = (body.get("versao") or "").strip()
                 if versao == "(sem pacotes)":
                     versao = ""   # placeholder do dropdown: nunca vira alvo
-                db.set_config("versao_alvo", versao)
-                self._json({"versao_alvo": versao})
+                if not did:
+                    self._json({"erro": "informe device_id"}, 400)
+                    return
+                db.set_device_target(did, versao)
+                log.info("Versão-alvo de %s definida: %s", did, versao or "(nenhuma)")
+                self._json({"device_id": did, "versao_alvo": versao})
             elif p.startswith("/api/publish"):
                 versao = (parse_qs(u.query).get("versao", [""])[0]).strip()
                 if not versao:

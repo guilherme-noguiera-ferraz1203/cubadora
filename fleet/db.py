@@ -55,6 +55,10 @@ class FleetDB:
         self._conn.row_factory = sqlite3.Row
         with self._lock:
             self._conn.executescript(_SCHEMA)
+            # Migração: versão-alvo POR equipamento (cada máquina tem a sua, p/ update/rollback isolado)
+            cols = [r["name"] for r in self._conn.execute("PRAGMA table_info(device)").fetchall()]
+            if "versao_alvo" not in cols:
+                self._conn.execute("ALTER TABLE device ADD COLUMN versao_alvo TEXT")
             self._conn.commit()
 
     # --------------------------------------------------------------- devices
@@ -112,6 +116,12 @@ class FleetDB:
                 (device_id, nome, unidade, agora))
             self._conn.commit()
         return True
+
+    def set_device_target(self, device_id: str, versao: str) -> None:
+        """Define a versão-alvo DESTE equipamento (update ou rollback). Vazio = não atualizar."""
+        with self._lock:
+            self._conn.execute("UPDATE device SET versao_alvo=? WHERE device_id=?", (versao, device_id))
+            self._conn.commit()
 
     # --------------------------------------------------------------- events
     def add_events(self, device_id: str, eventos: list[dict]) -> None:
