@@ -106,7 +106,12 @@ class FleetAgent:
                 self.app.atualizacao.reiniciar()
                 return "Reiniciando aplicação"
             if tipo == "update":
-                return self.app.atualizar()
+                # Aplica imediatamente a versao indicada (parametro), caindo para a versao-alvo
+                # configurada para este equipamento (config.frota lida em tempo real).
+                alvo = (par.get("versao") or "").strip()
+                if not alvo:
+                    return "Sem versao especificada para atualizar"
+                return self.app.atualizacao.aplicar_versao(self.cfg.servidor, alvo)
             if tipo == "config":
                 return self.app.atualizar_config(par.get("secao", ""), par.get("dados", {}) or {})
             if tipo == "comando":

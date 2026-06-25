@@ -196,7 +196,14 @@ def configurar_ip(modo: str = "dhcp", ip: str = "", gateway: str = "", dns: str 
 
 
 def reiniciar_servico(servico: str = "cubagempi") -> str:
+    """Reinicia um servico systemd reportando o erro REAL se falhar (sudo sem TTY)."""
     if not _linux():
-        return "Reiniciar serviço disponível apenas no Raspberry Pi"
-    subprocess.Popen(["sudo", "systemctl", "restart", servico])
-    return f"Reiniciando o serviço {servico}..."
+        return "Reiniciar servico disponivel apenas no Raspberry Pi"
+    for cmd in (["sudo", "-n", "systemctl", "restart", servico], ["systemctl", "restart", servico]):
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            if r.returncode == 0:
+                return f"Servico {servico} reiniciado"
+        except Exception:  # noqa: BLE001
+            pass
+    return f"FALHA ao reiniciar {servico} (sudoers/polkit)"

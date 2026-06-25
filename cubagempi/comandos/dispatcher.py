@@ -70,18 +70,36 @@ def _get_ip() -> str:
         return socket.gethostbyname(socket.gethostname())
 
 
+def _exec_power(cmd_systemctl: list, cmd_sudo: list, sucesso: str) -> str:
+    """Executa um comando de power (reboot/poweroff) reportando o erro REAL se falhar.
+
+    Tenta primeiro `systemctl <acao>` (via polkit) e cai para `sudo -n <bin>` (NOPASSWD).
+    `subprocess.Popen` original ocultava falha de sudo (travava em prompt invisivel sem TTY),
+    fazendo o painel reportar 'Reiniciando...' enquanto o equipamento nao reiniciava nunca.
+    """
+    if not sys.platform.startswith("linux"):
+        return "Disponivel apenas no Linux/Raspberry Pi"
+    tentativas = []
+    for cmd in (cmd_systemctl, cmd_sudo):
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            if r.returncode == 0:
+                return sucesso
+            tentativas.append(f"{' '.join(cmd)} -> rc={r.returncode} {(r.stderr or r.stdout).strip()[:140]}")
+        except subprocess.TimeoutExpired:
+            # Em alguns casos a chamada nem retorna (sistema ja iniciou shutdown) — tratamos como sucesso.
+            return sucesso
+        except Exception as exc:  # noqa: BLE001
+            tentativas.append(f"{' '.join(cmd)} -> {exc}")
+    return "FALHA: " + " | ".join(tentativas)
+
+
 def _reiniciar(_: str) -> str:
-    if sys.platform.startswith("linux"):
-        subprocess.Popen(["sudo", "reboot"])
-        return "Reiniciando..."
-    return "Reiniciar: disponível apenas no Linux/Raspberry Pi"
+    return _exec_power(["systemctl", "reboot"], ["sudo", "-n", "/sbin/reboot"], "Reiniciando equipamento...")
 
 
 def _desligar(_: str) -> str:
-    if sys.platform.startswith("linux"):
-        subprocess.Popen(["sudo", "shutdown", "-h", "now"])
-        return "Desligando..."
-    return "Desligar: disponível apenas no Linux/Raspberry Pi"
+    return _exec_power(["systemctl", "poweroff"], ["sudo", "-n", "/sbin/poweroff"], "Desligando equipamento...")
 
 
 def build_default_dispatcher(app) -> CommandDispatcher:

@@ -119,7 +119,7 @@ async function detalhe(id){const d=await getj('/api/device/'+id);const dev=d.dev
   <h3 style="margin:12px 0 6px">Controles</h3>
   <div style="display:flex;gap:8px;flex-wrap:wrap">
    <button onclick="cmd('${id}','restart_app')" style="background:#f59e0b">⚡ Reiniciar app</button>
-   <button onclick="cmd('${id}','update')" style="background:#2563eb">⬆️ Atualizar agora</button>
+   <button onclick="cmd('${id}','update',{versao:dev.versao_alvo||''})" style="background:#2563eb" ${dev.versao_alvo?'':'disabled title="Defina a versao-alvo acima primeiro"'}>⬆️ Atualizar agora</button>
    <button onclick="cmd('${id}','reboot')" style="background:#dc2626">🔄 Reiniciar equipamento</button>
    <button onclick="cmd('${id}','shutdown')" style="background:#475569">⏻ Desligar</button>
   </div>

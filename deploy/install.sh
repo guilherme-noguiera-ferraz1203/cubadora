@@ -54,7 +54,25 @@ if [ ! -f "$APP_DIR/config.yaml" ]; then
     sed -i "s#serial_port:.*#serial_port: $PORTA#" "$APP_DIR/config.yaml" 2>/dev/null || true
 fi
 
-# ----------------------------------------------------------- 5. BACKEND (systemd) + TELA (navegador)
+# ----------------------------------------------------------- 5. SUDOERS (controle remoto sem senha)
+# O backend roda como servico systemd (sem TTY); 'sudo' interativo trava em prompt invisivel
+# e os comandos remotos (reiniciar/desligar/restart_servico) falham SILENCIOSAMENTE.
+# Liberamos NOPASSWD apenas para os binarios estritamente necessarios.
+USER_ALVO="$(id -un)"
+echo ">> Configurando sudoers (NOPASSWD para reboot/poweroff/systemctl) p/ $USER_ALVO..."
+SUDOERS_TMP="$(mktemp)"
+cat > "$SUDOERS_TMP" <<EOF
+$USER_ALVO ALL=(ALL) NOPASSWD: /sbin/reboot, /sbin/poweroff, /sbin/halt, /sbin/shutdown, /bin/systemctl, /usr/bin/systemctl
+EOF
+if sudo visudo -cf "$SUDOERS_TMP" >/dev/null 2>&1; then
+    sudo install -m 440 "$SUDOERS_TMP" /etc/sudoers.d/cubagempi-nopasswd
+    echo "   ok (/etc/sudoers.d/cubagempi-nopasswd)"
+else
+    echo "   AVISO: validacao do sudoers falhou, deixe NOPASSWD manualmente."
+fi
+rm -f "$SUDOERS_TMP"
+
+# ----------------------------------------------------------- 6. BACKEND (systemd) + TELA (navegador)
 echo ">> Configurando o backend (systemd) e a tela local (navegador)..."
 APP_DIR="$APP_DIR" bash "$APP_DIR/deploy/setup-kiosk.sh"
 
