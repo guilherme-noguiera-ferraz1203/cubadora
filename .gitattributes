@@ -1,0 +1,8 @@
+# Força LF no repositório (scripts .sh / Dockerfile precisam de LF no Linux da VPS).
+* text=auto eol=lf
+*.sh   text eol=lf
+*.py   text eol=lf
+*.conf text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+Dockerfile text eol=lf
