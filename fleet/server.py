@@ -467,10 +467,17 @@ def _make_handler(db: FleetDB):
                     if any(t in ctype for t in ("text/html", "javascript", "text/css")):
                         try:
                             txt = body.decode("utf-8")
-                            for pat in ('"/api/', "'/api/", '"/logo', "'/logo",
-                                        'href="/', "href='/", 'src="/', "src='/", 'action="/', "action='/"):
-                                txt = txt.replace(pat, pat[0] + prefix + pat[1:])
-                            # nao prefixar URLs absolutas (http*)
+                            # Reescreve paths absolutos -> /device/<id>/...
+                            # Cobre fetch('/api/...'), <a href="/...">, src="/logo", action="/...",
+                            # e os literals JS das rotas do menu (/calibrar /config /diagnostico /sistema).
+                            rotas = ("api/", "logo", "calibrar", "config", "diagnostico", "sistema")
+                            for r in rotas:
+                                for q in ('"', "'"):
+                                    txt = txt.replace(f'{q}/{r}', f'{q}{prefix}/{r}')
+                            for atr in ("href", "src", "action"):
+                                for q in ('"', "'"):
+                                    txt = txt.replace(f'{atr}={q}/', f'{atr}={q}{prefix}/')
+                            # nao prefixar URLs absolutas (http*) — desfaz qualquer encavalamento
                             for bad in (prefix + '/http', prefix + '/https'):
                                 txt = txt.replace(bad, '/' + bad[len(prefix)+1:])
                             body = txt.encode("utf-8")
