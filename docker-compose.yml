@@ -11,5 +11,16 @@ services:
       - "127.0.0.1:9000:9000"      # acessível só localmente; NGINX faz o proxy público
     volumes:
       - ./fleet-data:/data         # persiste fleet.db + pacotes de versão
+      - ./tunnel-keys:/tunnel-keys # authorized_keys compartilhada com cubadora-sshd
     environment:
       - FLEET_PACKAGES=/data/packages
+      - TUNNEL_KEYS_PATH=/tunnel-keys/authorized_keys
+
+  cubadora-sshd:
+    build: ./deploy/sshd
+    image: cubadora-sshd:latest
+    container_name: cubadora-sshd
+    restart: unless-stopped
+    volumes:
+      # authorized_keys gerenciado pelo fleet (RO no sshd, RW no fleet)
+      - ./tunnel-keys:/tunnel-keys:ro

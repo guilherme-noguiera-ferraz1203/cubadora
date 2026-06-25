@@ -1,0 +1,18 @@
+# sshd_config — APENAS tunel reverso (autossh dos Pis)
+Port 22
+ListenAddress 0.0.0.0
+PermitRootLogin no
+PasswordAuthentication no
+PubkeyAuthentication yes
+ChallengeResponseAuthentication no
+UsePAM no
+AuthorizedKeysFile /tunnel-keys/authorized_keys
+AllowTcpForwarding yes
+GatewayPorts clientspecified
+X11Forwarding no
+PermitTTY no
+PermitOpen any
+ClientAliveInterval 30
+ClientAliveCountMax 3
+LogLevel INFO
+AllowUsers tunnel

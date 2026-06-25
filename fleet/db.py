@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS device (
@@ -62,6 +62,12 @@ class FleetDB:
             if "estado" not in cols:
                 # snapshot completo do device (status_dict + sistema_info + ultimo diagnostico) em JSON
                 self._conn.execute("ALTER TABLE device ADD COLUMN estado TEXT")
+            if "tunnel_port" not in cols:
+                # Porta TCP unica alocada por device para o tunel reverso SSH (autossh).
+                self._conn.execute("ALTER TABLE device ADD COLUMN tunnel_port INTEGER")
+            if "tunnel_pubkey" not in cols:
+                # Chave publica SSH (ed25519) que o Pi usa para abrir o tunel reverso.
+                self._conn.execute("ALTER TABLE device ADD COLUMN tunnel_pubkey TEXT")
             self._conn.commit()
 
     # --------------------------------------------------------------- devices
@@ -138,6 +144,33 @@ class FleetDB:
             self._conn.commit()
         return True
 
+    def alloc_tunnel_port(self, device_id: str, base: int = 19000) -> int:
+        """Aloca (ou retorna a existente) a porta TCP do tunel reverso desse equipamento.
+        Cada device tem uma porta unica (>= base) para o autossh fazer -R <port>:127.0.0.1:8080."""
+        with self._lock:
+            r = self._conn.execute("SELECT tunnel_port FROM device WHERE device_id=?", (device_id,)).fetchone()
+            if r and r["tunnel_port"]:
+                return int(r["tunnel_port"])
+            mx = self._conn.execute("SELECT MAX(tunnel_port) FROM device").fetchone()[0] or (base - 1)
+            nova = max(int(mx) + 1, base)
+            self._conn.execute("UPDATE device SET tunnel_port=? WHERE device_id=?", (nova, device_id))
+            self._conn.commit()
+            return nova
+
+    def set_tunnel_pubkey(self, device_id: str, pubkey: str) -> None:
+        with self._lock:
+            self._conn.execute("UPDATE device SET tunnel_pubkey=? WHERE device_id=?", (pubkey.strip(), device_id))
+            self._conn.commit()
+
+    def list_tunnels(self) -> list[dict]:
+        """Todos os devices com tunnel registrado — usado para gerar authorized_keys."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT device_id, tunnel_port, tunnel_pubkey FROM device "
+                "WHERE tunnel_port IS NOT NULL AND tunnel_pubkey IS NOT NULL AND tunnel_pubkey != ''"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def set_device_target(self, device_id: str, versao: str) -> None:
         """Define a versão-alvo DESTE equipamento (update ou rollback). Vazio = não atualizar."""
         with self._lock:
@@ -161,6 +194,31 @@ class FleetDB:
                 "SELECT nivel,mensagem,data FROM event WHERE device_id=? ORDER BY id DESC LIMIT ?",
                 (device_id, limit)).fetchall()
         return [dict(r) for r in rows]
+
+    def clear_events(self, device_id: str) -> int:
+        """Remove TODO o historico de eventos de um equipamento (botao 'limpar' no painel)."""
+        with self._lock:
+            n = self._conn.execute("DELETE FROM event WHERE device_id=?", (device_id,)).rowcount
+            self._conn.commit()
+        return n
+
+    def prune_events(self, max_por_device: int = 500, max_dias: int = 30) -> int:
+        """Retencao automatica: mantem so os ultimos N eventos por device, e descarta os > max_dias.
+        Roda periodicamente pra evitar que o banco cresca indefinidamente."""
+        agora = datetime.now()
+        corte = (agora.replace(microsecond=0) - timedelta(days=max_dias)).isoformat()
+        with self._lock:
+            n_velhos = self._conn.execute("DELETE FROM event WHERE data < ?", (corte,)).rowcount
+            # mantem so os ultimos max_por_device por device
+            self._conn.execute(
+                "DELETE FROM event WHERE id NOT IN ("
+                "  SELECT id FROM event e WHERE id IN ("
+                "    SELECT id FROM event WHERE device_id=e.device_id ORDER BY id DESC LIMIT ?"
+                "  )"
+                ")", (max_por_device,))
+            n_extras = self._conn.total_changes - n_velhos
+            self._conn.commit()
+        return n_velhos + max(0, n_extras)
 
     # --------------------------------------------------------------- commands
     def add_command(self, device_id: str, tipo: str, parametros: dict | None = None) -> int:

@@ -7,6 +7,8 @@ import logging
 import os
 import secrets
 import threading
+import urllib.error
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -124,6 +126,8 @@ async function cmd(id,tipo,parametros){
 async function cmdTexto(id){const t=document.getElementById('cmdtxt').value.trim();if(t)await cmd(id,'comando',{texto:t})}
 async function cmdConfig(id){const sec=document.getElementById('cfgsec').value.trim();let dd={};try{dd=JSON.parse(document.getElementById('cfgdados').value||'{}')}catch(e){alert('JSON inválido em Dados');return}if(sec)await cmd(id,'config',{secao:sec,dados:dd})}
 async function cmdConfigKiosk(id,on){await cmd(id,'config',{secao:'kiosk',dados:{modo_producao:on}})}
+async function limparHist(id){if(!confirm('Apagar TODO o histórico de avisos/erros deste equipamento?'))return;
+ const r=await post('/api/events/clear',{device_id:id}); alert((r.removidos||0)+' eventos removidos'); detalhe(id)}
 async function detalhe(id){const d=await getj('/api/device/'+id);const dev=d.device,ev=d.eventos||[],cmds=d.comandos||[];const onl=online(dev.last_seen);
  const optsVer=['<option value="">(não atualizar)</option>'].concat(VERSOES.map(v=>'<option value="'+v+'"'+(v===(dev.versao_alvo||'')?' selected':'')+'>'+v+'</option>')).join('');
  document.getElementById('box').innerHTML=`<h2 style="margin-bottom:4px">${esc(dev.nome||id)}</h2>
@@ -143,6 +147,7 @@ async function detalhe(id){const d=await getj('/api/device/'+id);const dev=d.dev
 
   <h3 style="margin:12px 0 6px">Controles</h3>
   <div style="display:flex;gap:8px;flex-wrap:wrap">
+   <button onclick="window.open('/device/${id}/','_blank')" style="background:#7c3aed" ${dev.tunnel_port?'':'disabled title="Tunel nao registrado — atualize/reinstale o equipamento p/ esta versao"'}>🖥️ Abrir tela do equipamento</button>
    <button onclick="cmd('${id}','restart_app')" style="background:#f59e0b">⚡ Reiniciar app</button>
    <button onclick="cmd('${id}','update',{versao:dev.versao_alvo||''})" style="background:#2563eb" ${dev.versao_alvo?'':'disabled title="Defina a versao-alvo acima primeiro"'}>⬆️ Atualizar agora</button>
    <button onclick="cmd('${id}','diagnostico')" style="background:#0891b2">🩺 Rodar diagnóstico</button>
@@ -170,7 +175,7 @@ async function detalhe(id){const d=await getj('/api/device/'+id);const dev=d.dev
 
   ${cmds.length?`<h3 style="margin:14px 0 6px">Comandos recentes</h3>${cmds.map(c=>`<div class="ev">${statusCmd(c.status)} <b>${esc(c.tipo)}</b>${c.parametros&&c.parametros.texto?' '+esc(c.parametros.texto):''}${c.resultado?' — '+esc(c.resultado):''} <span style="color:#94a3b8">${(c.ack_em||c.criado_em||'').replace('T',' ').substr(11,8)}</span></div>`).join('')}`:''}
 
-  <h3 style="margin:14px 0 6px">Atividade (avisos e erros)</h3>
+  <h3 style="margin:14px 0 6px">Atividade (avisos e erros) <button onclick="limparHist('${id}')" style="background:#e2e8f0;color:#0f172a;font-size:12px;padding:4px 8px;margin-left:8px">🧹 Limpar histórico</button></h3>
   ${resumirEventos(ev)}
 
   <div style="margin-top:16px"><button onclick="fecha()" style="background:#e2e8f0;color:#0f172a">Fechar</button></div>`;
@@ -225,6 +230,40 @@ carregar();setInterval(carregar,5000);
 # URL do repositório de código do equipamento (clone público no Pi durante a instalação).
 _REPO = os.environ.get("FLEET_REPO", "https://github.com/guilherme-noguiera-ferraz1203/cubadora.git")
 
+# Caminhos / config do tunel reverso (autossh dos Pis -> container cubadora-sshd)
+_TUNNEL_KEYS = os.environ.get("TUNNEL_KEYS_PATH", "/tunnel-keys/authorized_keys")
+_TUNNEL_SSH_HOST_PUBLIC = os.environ.get("TUNNEL_HOST_PUBLIC", "cubadora.specialcore.com.br")
+_TUNNEL_SSH_PORT_PUBLIC = int(os.environ.get("TUNNEL_PORT_PUBLIC", "2222"))
+_TUNNEL_SSH_USER = os.environ.get("TUNNEL_USER", "tunnel")
+# Hostname/porta do container sshd visto pelo fleet (proxy reverso interno)
+_TUNNEL_BACKEND_HOST = os.environ.get("TUNNEL_BACKEND_HOST", "cubadora-sshd")
+
+
+def _rewrite_authorized_keys(db) -> int:
+    """Regenera /tunnel-keys/authorized_keys com TODOS os devices registrados.
+    Cada chave fica restrita a fazer port-forward APENAS na porta do seu device, sem shell/X11/agent.
+    Chamado quando devices registram chave nova."""
+    linhas = []
+    for d in db.list_tunnels():
+        port = d["tunnel_port"]
+        pk = (d["tunnel_pubkey"] or "").strip()
+        if not pk or not port:
+            continue
+        # restricoes: so port-forward em 0.0.0.0:<port>, nada mais
+        restr = (
+            f'no-pty,no-user-rc,no-X11-forwarding,no-agent-forwarding,'
+            f'permitlisten="0.0.0.0:{port}",permitlisten="127.0.0.1:{port}",command="/sbin/nologin"'
+        )
+        linhas.append(f"{restr} {pk}\n")
+    os.makedirs(os.path.dirname(_TUNNEL_KEYS) or "/", exist_ok=True)
+    with open(_TUNNEL_KEYS, "w") as f:
+        f.writelines(linhas)
+    try:
+        os.chmod(_TUNNEL_KEYS, 0o600)
+    except OSError:
+        pass
+    return len(linhas)
+
 # Script de bootstrap servido em GET /install/<device_id>. Roda no Raspberry como:
 #   curl -fsSL https://.../install/<id> | sudo bash
 # Placeholders __X__ são substituídos por _bootstrap_script(); o bash usa $VAR normalmente.
@@ -260,7 +299,7 @@ APP_DIR="$APP_BASE/python"
 
 echo ">> Dependencias do sistema (git, python3, pip)..."
 apt-get update -y
-apt-get install -y git python3 python3-pip
+apt-get install -y git python3 python3-pip autossh openssh-client
 
 # Nunca apaga instalacao anterior: move para um backup com data/hora.
 if [ -e "$APP_DIR" ]; then
@@ -303,6 +342,48 @@ chown "$TARGET_USER":"$TARGET_USER" "$APP_DIR/config.yaml"
 
 # Reinicia o backend para carregar a config de frota recem-gravada e comecar a reportar ja.
 systemctl restart cubagempi 2>/dev/null || true
+
+# ----- Tunel reverso (Fase 2): permite operar a tela do equipamento pelo painel -----
+echo ">> Configurando tunel reverso (autossh)..."
+SSH_DIR="$TARGET_HOME/.ssh"
+KEY="$SSH_DIR/cubadora-tunnel"
+sudo -u "$TARGET_USER" mkdir -p "$SSH_DIR" && chmod 700 "$SSH_DIR"
+[ -f "$KEY" ] || sudo -u "$TARGET_USER" ssh-keygen -t ed25519 -N "" -f "$KEY" -C "cubadora-$DEVICE_ID" -q
+# host key do servidor (evita prompt)
+SSH_HOST_PORT_LINE="[$(echo "$SERVIDOR" | sed -E 's#https?://##; s#/.*##')]:2222"
+sudo -u "$TARGET_USER" sh -c "ssh-keyscan -p 2222 -t ed25519 $(echo '$SERVIDOR' | sed -E 's#https?://##; s#/.*##') 2>/dev/null >> $SSH_DIR/known_hosts" || true
+PUBKEY="$(cat "$KEY.pub")"
+# registra a pubkey no painel; recebe porta+host+user
+TUNNEL_JSON="$(curl -fsS --max-time 15 -X POST -H 'Content-Type: application/json' \
+  -d "{\"pubkey\":\"$PUBKEY\"}" "$SERVIDOR/api/device/$DEVICE_ID/tunnel" || echo '{}')"
+TUNNEL_PORT="$(echo "$TUNNEL_JSON" | python3 -c 'import sys,json;d=json.load(sys.stdin) if sys.stdin.isatty() is False else {};print(d.get("tunnel_port",""))' 2>/dev/null || true)"
+TUNNEL_HOST="$(echo "$TUNNEL_JSON" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("ssh_host",""))' 2>/dev/null || true)"
+TUNNEL_USER="$(echo "$TUNNEL_JSON" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("ssh_user","tunnel"))' 2>/dev/null || true)"
+TUNNEL_SSH_PORT="$(echo "$TUNNEL_JSON" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("ssh_port",2222))' 2>/dev/null || true)"
+if [ -n "$TUNNEL_PORT" ]; then
+  TSVC=/etc/systemd/system/cubagempi-tunnel.service
+  cat <<EOF | sudo tee "$TSVC" >/dev/null
+[Unit]
+Description=Cubadora tunel reverso (autossh) p/ painel da frota
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=$TARGET_USER
+Environment="AUTOSSH_GATETIME=0"
+ExecStart=/usr/bin/autossh -M 0 -N -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$SSH_DIR/known_hosts -i $KEY -p $TUNNEL_SSH_PORT -R 0.0.0.0:$TUNNEL_PORT:127.0.0.1:8080 $TUNNEL_USER@$TUNNEL_HOST
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now cubagempi-tunnel
+  echo "   tunel ativo na porta $TUNNEL_PORT (servidor $TUNNEL_HOST:$TUNNEL_SSH_PORT)"
+else
+  echo "   AVISO: registro do tunel falhou — tente novamente com: curl -fsSL $SERVIDOR/install/$DEVICE_ID | sudo bash"
+fi
 
 # O install.sh ja configurou o backend como servico systemd (cubagempi) — sobe sozinho no boot,
 # independente do desktop — e a tela local pelo navegador. Nada a desabilitar aqui.
@@ -352,6 +433,41 @@ def _make_handler(db: FleetDB):
             host = self.headers.get("Host") or self.headers.get("X-Forwarded-Host") or "localhost"
             return f"{proto}://{host}"
 
+        def _tunnel_proxy(self, db):
+            """Reverse proxy /device/<id>/<path>  ->  http://cubadora-sshd:<tunnel_port>/<path>.
+            A request ja chega autenticada pelo nginx central (auth_basic do painel).
+            O Pi precisa estar com autossh ativo para a porta tunelada estar de pe."""
+            parts = self.path.split("/", 3)   # ['', 'device', '<id>', '<resto>?qs']
+            if len(parts) < 3:
+                self._json({"erro": "rota invalida"}, 400); return
+            did = parts[2]
+            resto = "/" + (parts[3] if len(parts) > 3 else "")
+            dev = db.get_device(did)
+            if not dev or not dev.get("tunnel_port"):
+                self._send(404, b"<h3>Tunel deste equipamento nao configurado.</h3>", "text/html; charset=utf-8"); return
+            url = f"http://{_TUNNEL_BACKEND_HOST}:{dev['tunnel_port']}{resto}"
+            # encaminha headers e body
+            data = self._read() if self.command in ("POST", "PUT", "PATCH") else None
+            headers = {k: v for k, v in self.headers.items()
+                       if k.lower() not in ("host", "content-length", "authorization", "connection")}
+            try:
+                req = urllib.request.Request(url, data=data, headers=headers, method=self.command)
+                with urllib.request.urlopen(req, timeout=20) as resp:
+                    body = resp.read()
+                    self.send_response(resp.status)
+                    for h, v in resp.headers.items():
+                        if h.lower() in ("transfer-encoding", "connection", "content-length"): continue
+                        self.send_header(h, v)
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+            except urllib.error.HTTPError as e:
+                body = e.read() or f"<h3>Erro {e.code} do equipamento</h3>".encode()
+                self._send(e.code, body, e.headers.get("Content-Type", "text/plain"))
+            except Exception as exc:  # noqa: BLE001
+                self._send(502, f"<h3>Equipamento inacessivel via tunel: {exc}</h3>".encode(),
+                           "text/html; charset=utf-8")
+
         def do_GET(self):
             u = urlparse(self.path)
             p = u.path
@@ -359,6 +475,18 @@ def _make_handler(db: FleetDB):
                 self._send(200, _PAGE.encode("utf-8"), "text/html; charset=utf-8")
             elif p.startswith("/api/devices"):
                 self._json(db.list_devices())
+            elif p.startswith("/api/device/") and p.endswith("/tunnel"):
+                # Pi consulta a config do tunel reverso (sem auth — vinculado por device_id). DEVE
+                # vir antes do /api/device/<id> generico.
+                did = p.split("/")[3]
+                if not db.get_device(did):
+                    self._json({"erro": "device nao cadastrado"}, 404); return
+                port = db.alloc_tunnel_port(did)
+                self._json({
+                    "device_id": did, "tunnel_port": port,
+                    "ssh_host": _TUNNEL_SSH_HOST_PUBLIC, "ssh_port": _TUNNEL_SSH_PORT_PUBLIC,
+                    "ssh_user": _TUNNEL_SSH_USER,
+                })
             elif p.startswith("/api/device/"):
                 did = p.rsplit("/", 1)[-1]
                 dev = db.get_device(did)
@@ -376,6 +504,10 @@ def _make_handler(db: FleetDB):
                         self._send(200, f.read(), "application/zip")
                 else:
                     self._json({"erro": "pacote não encontrado"}, 404)
+            elif p.startswith("/device/"):
+                # Proxy reverso HTTP para a UI do equipamento (atras de auth_basic do nginx).
+                # /device/<id>/<resto>  ->  http://cubadora-sshd:<tunnel_port>/<resto>
+                self._tunnel_proxy(db)
             elif p.startswith("/install/"):
                 # Público (sem senha): o Pi baixa este script no momento da instalação.
                 device_id = p.rsplit("/", 1)[-1]
@@ -393,6 +525,8 @@ def _make_handler(db: FleetDB):
         def do_POST(self):
             u = urlparse(self.path)
             p = u.path
+            if p.startswith("/device/"):
+                self._tunnel_proxy(db); return
             if p.startswith("/api/heartbeat"):
                 try:
                     payload = json.loads(self._read().decode("utf-8") or "{}")
@@ -413,6 +547,34 @@ def _make_handler(db: FleetDB):
                     self._json({"versao_alvo": alvo, "comandos": comandos})
                 except Exception as exc:  # noqa: BLE001
                     self._json({"erro": str(exc)}, 500)
+            elif p.startswith("/api/device/") and p.endswith("/tunnel"):
+                # Pi registra sua chave publica SSH (POST sem auth — vinculado pelo device_id).
+                # O fleet regenera authorized_keys do container sshd, aplicando restricoes
+                # de port-forwarding so para a porta deste device.
+                did = p.split("/")[3]
+                body = json.loads(self._read().decode("utf-8") or "{}")
+                pubkey = (body.get("pubkey") or "").strip()
+                if not db.get_device(did):
+                    self._json({"erro": "device nao cadastrado"}, 404); return
+                if not pubkey or "ssh-" not in pubkey:
+                    self._json({"erro": "pubkey ausente/invalida"}, 400); return
+                port = db.alloc_tunnel_port(did)
+                db.set_tunnel_pubkey(did, pubkey)
+                n = _rewrite_authorized_keys(db)
+                log.info("Tunel: device %s registrado na porta %s (total %s chaves)", did, port, n)
+                self._json({
+                    "device_id": did, "tunnel_port": port,
+                    "ssh_host": _TUNNEL_SSH_HOST_PUBLIC, "ssh_port": _TUNNEL_SSH_PORT_PUBLIC,
+                    "ssh_user": _TUNNEL_SSH_USER,
+                })
+            elif p.startswith("/api/events/clear"):
+                # Limpa todo o historico de eventos de UM equipamento (botao no painel).
+                body = json.loads(self._read().decode("utf-8") or "{}")
+                did = (body.get("device_id") or "").strip()
+                if not did:
+                    self._json({"erro": "informe device_id"}, 400); return
+                n = db.clear_events(did)
+                self._json({"removidos": n})
             elif p.startswith("/api/command"):
                 # Protegido pela senha do painel (nginx). Enfileira um comando para o equipamento.
                 body = json.loads(self._read().decode("utf-8") or "{}")
@@ -479,8 +641,20 @@ class FleetServer:
     def port(self) -> int:
         return self._server.server_address[1] if self._server else self.porta
 
+    def _retention_loop(self) -> None:
+        """Roda prune_events a cada 1h para o banco nao crescer indefinidamente."""
+        import time as _t
+        while True:
+            try:
+                n = self.db.prune_events(max_por_device=500, max_dias=30)
+                if n: log.info("Retencao: %d eventos antigos descartados", n)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Retencao: erro (%s)", exc)
+            _t.sleep(3600)
+
     def start(self, background: bool = True) -> None:
         self._server = ThreadingHTTPServer(("0.0.0.0", self.porta), _make_handler(self.db))
+        threading.Thread(target=self._retention_loop, name="retention", daemon=True).start()
         if background:
             threading.Thread(target=self._server.serve_forever, daemon=True).start()
         log.info("Servidor de frota em http://0.0.0.0:%d", self.porta)
