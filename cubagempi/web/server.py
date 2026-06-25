@@ -82,7 +82,17 @@ async function post(u,b){return await (await fetch(u,{method:'POST',headers:{'Co
 function toast(t){const m=g('msg');m.textContent=t;m.classList.add('show');clearTimeout(window._tt);window._tt=setTimeout(()=>m.classList.remove('show'),3500)}
 function relogio(){const c=g('clk');if(c)c.textContent=new Date().toLocaleString('pt-BR')}
 setInterval(relogio,1000);relogio();
-async function carregarNome(){try{const s=await getj('/api/status');if(g('nomeEq'))g('nomeEq').textContent=s.nome_equipamento||'Cubagem'}catch(e){}}
+async function carregarNome(){try{const s=await getj('/api/status');if(g('nomeEq'))g('nomeEq').textContent=s.nome_equipamento||'Cubagem';aplicarLockdown(s)}catch(e){}}
+function aplicarLockdown(s){
+ // Em modo producao, esconde dinamicamente as abas Calibrar/Config/Diagnostico/Sistema mesmo
+ // sem F5 — atualiza em ate ~5s (proximo poll). NAO afeta o acesso admin via ?admin=<chave>.
+ const oculto = !!(s && s.kiosk_modo_producao) && !(location.search.indexOf('admin=')>=0);
+ const map={ '/calibrar':oculto, '/config':oculto, '/diagnostico':oculto, '/sistema':oculto };
+ document.querySelectorAll('.nav .links a').forEach(a=>{
+   const href=a.getAttribute('href'); if(map[href]!==undefined) a.style.display = map[href]?'none':'';
+ });
+}
+setInterval(carregarNome, 5000);
 carregarNome();
 """
 

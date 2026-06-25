@@ -12,13 +12,17 @@ diferentes, atrás de NAT.
 
 from __future__ import annotations
 
+import datetime
 import json
 import logging
+import os
 import threading
 import urllib.request
 
 from .. import __version__ as SW_VERSION
 from ..core.log_buffer import get_log_buffer
+
+_DIAG_FILE = "data/ultimo_diag.json"
 
 log = logging.getLogger(__name__)
 
@@ -35,7 +39,8 @@ class FleetAgent:
         self._ultimo_seq = 0
         self._executados: set = set()   # ids de comandos já executados (dedup)
         self._resultados: list = []     # resultados pendentes de reportar ao painel
-        self._ultimo_diag: dict | None = None  # cache do ultimo diagnostico sob demanda
+        # Cache do ultimo diagnostico — PERSISTE em disco para sobreviver a restart_app/OTA.
+        self._ultimo_diag: dict | None = self._carregar_diag()
 
     def start(self) -> None:
         if not self.cfg.servidor:
@@ -46,6 +51,19 @@ class FleetAgent:
 
     def stop(self) -> None:
         self._stop.set()
+
+    def _carregar_diag(self) -> dict | None:
+        try:
+            with open(_DIAG_FILE, encoding="utf-8") as f: return json.load(f)
+        except (FileNotFoundError, ValueError):
+            return None
+
+    def _salvar_diag(self, d: dict) -> None:
+        try:
+            os.makedirs(os.path.dirname(_DIAG_FILE) or ".", exist_ok=True)
+            with open(_DIAG_FILE, "w", encoding="utf-8") as f: json.dump(d, f, ensure_ascii=False)
+        except Exception as exc:  # noqa: BLE001
+            log.debug("Frota: falha ao persistir diag (%s)", exc)
 
     def _coletar_eventos(self) -> list[dict]:
         self._ultimo_seq, eventos = get_log_buffer().desde(self._ultimo_seq, ("WARNING", "ERROR", "CRITICAL"))
@@ -131,12 +149,14 @@ class FleetAgent:
                 # Acesso a TODOS os comandos do dispatcher (tara, calibrar, integração, etc.)
                 return self.app.dispatcher.execute(par.get("texto", ""))
             if tipo == "diagnostico":
-                # Roda o diagnostico (pesado: le sensores e balanca) e cacheia para enviar
-                # no proximo heartbeat dentro de estado.diagnostico.
+                # Roda o diagnostico (pesado: le sensores e balanca), PERSISTE em disco e forca
+                # um heartbeat imediato para o painel receber os detalhes antes de qualquer restart.
                 self._ultimo_diag = self.app.diagnostico()
-                self._ultimo_diag["ts"] = __import__("datetime").datetime.now().isoformat()
+                self._ultimo_diag["ts"] = datetime.datetime.now().isoformat()
+                self._salvar_diag(self._ultimo_diag)
+                threading.Thread(target=self.heartbeat, name="hb-diag", daemon=True).start()
                 ok = self._ultimo_diag.get("apto_producao")
-                return ("Diagnostico OK" if ok else "Diagnostico com problemas") + " (ver detalhes no painel)"
+                return ("Diagnostico OK" if ok else "Diagnostico com problemas") + " (detalhes no painel)"
             return f"Comando desconhecido: {tipo}"
         except Exception as exc:  # noqa: BLE001
             log.exception("Frota: falha ao executar comando %s", tipo)

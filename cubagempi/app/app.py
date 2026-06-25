@@ -527,6 +527,7 @@ class App:
             "integracao_habilitada": self.integracao.habilitada,
             "versao": SW_VERSION,
             "unidade": self.config.frota.unidade,
+            "kiosk_modo_producao": bool(getattr(getattr(self.config, "kiosk", None), "modo_producao", False)),
         }
 
     # ----------------------------------------------------------------- logo

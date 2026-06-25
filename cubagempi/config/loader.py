@@ -67,7 +67,7 @@ def load_config(path: str | None = None) -> AppConfig:
 # Seções (sub-dataclasses) da configuração.
 SECOES = ("rs485", "sensor", "ajustes", "balanca", "camera", "dinamica",
           "cloud", "web", "etiqueta", "calibracao", "login", "leitor", "lcd",
-          "sorter", "atm", "frota")
+          "sorter", "atm", "frota", "kiosk")
 
 
 def config_to_dict(cfg: AppConfig) -> dict:
