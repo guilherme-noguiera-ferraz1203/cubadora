@@ -189,11 +189,31 @@ async function setVersao(id){const v=document.getElementById('selVerDev').value;
 function abrirCadastro(){
  document.getElementById('regbox').innerHTML=`
   <h2 style="margin-bottom:4px">Cadastrar equipamento</h2>
-  <p class="hint" style="margin-bottom:6px">Dê um nome ao equipamento. Vou gerar um link de instalação para rodar no Raspberry via SSH.</p>
+  <p class="hint" style="margin-bottom:6px">Informe os dados — o painel gera um instalador customizado pra essa placa e tipo de equipamento.</p>
   <label>Nome do equipamento *</label>
   <input id="regNome" placeholder="ex.: Cubadora Expedição 01">
   <label>Unidade (opcional)</label>
   <input id="regUni" placeholder="ex.: CD São Paulo">
+  <div style="display:flex;gap:10px">
+   <div style="flex:1">
+    <label>Placa Raspberry *</label>
+    <select id="regPlaca" style="width:100%">
+     <option value="pi4">Raspberry Pi 4</option>
+     <option value="pi5">Raspberry Pi 5</option>
+     <option value="pi3">Raspberry Pi 3 / 3+</option>
+    </select>
+   </div>
+   <div style="flex:1">
+    <label>Tipo de equipamento *</label>
+    <select id="regModelo" style="width:100%">
+     <option value="ESTATICA_2" selected>Estática 2 (padrão)</option>
+     <option value="ESTATICA_1">Estática 1</option>
+     <option value="ESTATICA_LCD">Estática LCD</option>
+     <option value="DINAMICA_PI">Dinâmica (PI)</option>
+     <option value="DINAMICA_CLP">Dinâmica (CLP)</option>
+    </select>
+   </div>
+  </div>
   <div style="margin-top:16px;display:flex;gap:8px">
    <button onclick="cadastrar()">Gerar link de instalação</button>
    <button onclick="fechaReg()" style="background:#e2e8f0;color:#0f172a">Cancelar</button>
@@ -205,8 +225,10 @@ function fechaReg(){document.getElementById('regmodal').style.display='none';car
 async function cadastrar(){
  const nome=document.getElementById('regNome').value.trim();
  const unidade=document.getElementById('regUni').value.trim();
+ const placa=document.getElementById('regPlaca').value;
+ const modelo_maquina=document.getElementById('regModelo').value;
  if(!nome){alert('Informe o nome do equipamento');return}
- const r=await post('/api/register',{nome,unidade});
+ const r=await post('/api/register',{nome,unidade,placa,modelo_maquina});
  if(r.erro){alert(r.erro);return}
  document.getElementById('regbox').innerHTML=`
   <h2 style="margin-bottom:4px">✅ "${r.nome}" cadastrado</h2>
@@ -215,6 +237,7 @@ async function cadastrar(){
   <button onclick="copiar()">📋 Copiar comando</button>
   <p class="hint" style="margin-top:14px">
    • Já aparece no painel como <b>aguardando instalação</b>.<br>
+   • Instalador customizado para <b>${r.placa||'?'}</b> + <b>${r.modelo_maquina||'?'}</b> — usa o código publicado no painel (sem GitHub).<br>
    • Depois do comando, ele instala, configura e começa a reportar sozinho.<br>
    • ID: <code>${r.device_id}</code>
   </p>
@@ -275,18 +298,21 @@ def _rewrite_authorized_keys(db) -> int:
 _BOOTSTRAP = r"""#!/usr/bin/env bash
 # Instalacao automatica da Cubadora — equipamento "__NOME__" (__UNIDADE__).
 # Gerado pelo painel de frota. NAO edite: regenere cadastrando o equipamento de novo.
+# Codigo distribuido pelo PROPRIO PAINEL (sem dependencia do GitHub):
+#   curl -fsSL $SERVIDOR/api/package/latest -> /tmp/cubagem.zip -> unzip em APP_DIR.
 set -euo pipefail
 
 SERVIDOR="__SERVIDOR__"
 DEVICE_ID="__DEVICE_ID__"
 NOME="__NOME__"
 UNIDADE="__UNIDADE__"
-REPO="__REPO__"
+PLACA="__PLACA__"             # pi3 | pi4 | pi5 (escolhido no cadastro)
+MODELO_MAQUINA="__MODELO__"   # ESTATICA_1 | ESTATICA_2 | ESTATICA_LCD | DINAMICA_PI | DINAMICA_CLP
 
 echo "==================================================================="
-echo " Cubadora — instalacao do equipamento: $NOME"
-echo " Unidade: ${UNIDADE:-(nao informada)} | Servidor: $SERVIDOR"
-echo " ID: $DEVICE_ID"
+echo " Cubadora — instalacao de '$NOME'"
+echo " Unidade: ${UNIDADE:-(nao informada)} | Placa: $PLACA | Modelo: $MODELO_MAQUINA"
+echo " Servidor: $SERVIDOR | ID: $DEVICE_ID"
 echo "==================================================================="
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -294,7 +320,6 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
-# Usuario/dir alvo (padrao pi, igual ao cubagempi.service). Detecta quem chamou via sudo.
 TARGET_USER="${SUDO_USER:-pi}"
 id "$TARGET_USER" >/dev/null 2>&1 || TARGET_USER="$(id -un)"
 TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
@@ -302,38 +327,83 @@ TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
 APP_BASE="$TARGET_HOME/cubagem-pi"
 APP_DIR="$APP_BASE/python"
 
-echo ">> Dependencias do sistema (git, python3, pip)..."
-apt-get update -y
-apt-get install -y git python3 python3-pip autossh openssh-client
+# Detecta SO p/ escolher entre 'chromium-browser' (Bullseye) e 'chromium' (Bookworm/Trixie).
+. /etc/os-release 2>/dev/null || true
+CODENAME="${VERSION_CODENAME:-desconhecido}"
+echo ">> SO detectado: $CODENAME"
 
-# Nunca apaga instalacao anterior: move para um backup com data/hora.
+echo ">> Dependencias do sistema (curl, unzip, python3, autossh)..."
+apt-get update -y || true
+apt-get install -y curl unzip python3 python3-pip python3-yaml autossh openssh-client i2c-tools unclutter || true
+# Navegador do kiosk: pacote varia conforme SO/placa.
+if ! command -v chromium-browser >/dev/null 2>&1 && ! command -v chromium >/dev/null 2>&1; then
+    apt-get install -y chromium-browser 2>/dev/null || apt-get install -y chromium 2>/dev/null || \
+        echo "   AVISO: nao instalou navegador (kiosk nao vai abrir ate isso ser resolvido)."
+fi
+
+# Backup automatico de instalacao anterior, NUNCA apaga.
 if [ -e "$APP_DIR" ]; then
   BKP="$APP_DIR.bak.$(date +%Y%m%d%H%M%S)"
   echo ">> Instalacao anterior encontrada -> backup em $BKP"
   mv "$APP_DIR" "$BKP"
 fi
 
-echo ">> Baixando o codigo do equipamento ($REPO)..."
-mkdir -p "$APP_BASE"
-git clone --depth 1 "$REPO" "$APP_DIR"
+echo ">> Baixando o codigo do painel ($SERVIDOR/api/package/latest)..."
+mkdir -p "$APP_BASE" "$APP_DIR"
+TMP_ZIP="$(mktemp --suffix=.zip)"
+curl -fsSL --max-time 60 "$SERVIDOR/api/package/latest" -o "$TMP_ZIP"
+unzip -oq "$TMP_ZIP" -d "$APP_DIR"
+rm -f "$TMP_ZIP"
 chown -R "$TARGET_USER":"$TARGET_USER" "$APP_BASE"
 
-# Torna o install.sh agnostico do usuario (ele tem APP_DIR fixo em /home/pi/...).
-sed -i "s#^APP_DIR=.*#APP_DIR=\"$APP_DIR\"#" "$APP_DIR/deploy/install.sh"
+# Dependencias Python. Em Pi 3 (Bullseye) o lgpio costuma quebrar na compilacao
+# (kernel/libgpiod antigos); RPi.GPIO + pyserial cobrem o que precisa nessa placa.
+echo ">> Dependencias Python (placa=$PLACA, SO=$CODENAME)..."
+PIP="pip3"
+if [ "$CODENAME" = "bookworm" ] || [ "$CODENAME" = "trixie" ]; then
+    PIP="pip3 --break-system-packages"
+fi
+$PIP install pyserial smbus2 gpiozero PyYAML || true
+if [ "$PLACA" = "pi4" ] || [ "$PLACA" = "pi5" ]; then
+    $PIP install lgpio || echo "   AVISO: lgpio nao instalou — gpiozero cai para outro backend."
+else
+    # Pi 3: lgpio raramente compila; usa RPi.GPIO como backend (gpiozero detecta).
+    $PIP install RPi.GPIO || true
+fi
 
-echo ">> Rodando o instalador (deps Python, UART/I2C, kiosk)..."
-sudo -u "$TARGET_USER" bash "$APP_DIR/deploy/install.sh"
+# UART/I2C
+if command -v raspi-config >/dev/null 2>&1; then
+    raspi-config nonint do_serial_hw 0    2>/dev/null || true
+    raspi-config nonint do_serial_cons 1  2>/dev/null || true
+    raspi-config nonint do_i2c 0          2>/dev/null || true
+fi
+[ -e /dev/serial0 ] && PORTA="/dev/serial0" || PORTA="/dev/ttyAMA0"
 
-echo ">> Gravando identidade e frota no config.yaml..."
-python3 - "$APP_DIR/config.yaml" "$NOME" "$UNIDADE" "$SERVIDOR" "$DEVICE_ID" <<'PY'
+# Sudoers: necessario p/ comandos remotos (reboot/poweroff/systemctl) sem TTY.
+SUDOERS_TMP="$(mktemp)"
+echo "$TARGET_USER ALL=(ALL) NOPASSWD: /sbin/reboot, /sbin/poweroff, /sbin/halt, /sbin/shutdown, /bin/systemctl, /usr/bin/systemctl" > "$SUDOERS_TMP"
+visudo -cf "$SUDOERS_TMP" >/dev/null 2>&1 && install -m 440 "$SUDOERS_TMP" /etc/sudoers.d/cubagempi-nopasswd || true
+rm -f "$SUDOERS_TMP"
+
+# Configura systemd + kiosk usando o setup do proprio pacote.
+echo ">> Configurando backend (systemd) e tela local (navegador)..."
+APP_DIR="$APP_DIR" USER_ALVO="$TARGET_USER" bash "$APP_DIR/deploy/setup-kiosk.sh" || true
+
+echo ">> Gravando identidade, frota e MODELO no config.yaml..."
+[ -f "$APP_DIR/config.yaml" ] || cp "$APP_DIR/config.example.yaml" "$APP_DIR/config.yaml"
+python3 - "$APP_DIR/config.yaml" "$NOME" "$UNIDADE" "$SERVIDOR" "$DEVICE_ID" "$MODELO_MAQUINA" "$PORTA" <<'PY'
 import sys, yaml
-cfg_path, nome, unidade, servidor, device_id = sys.argv[1:6]
+cfg_path, nome, unidade, servidor, device_id, modelo, porta = sys.argv[1:8]
 try:
     with open(cfg_path) as f:
         cfg = yaml.safe_load(f) or {}
 except FileNotFoundError:
     cfg = {}
 cfg["nome_equipamento"] = nome
+cfg["modelo_maquina"]   = modelo
+rs485 = cfg.get("rs485") or {}
+if porta: rs485["serial_port"] = porta
+cfg["rs485"] = rs485
 frota = cfg.get("frota") or {}
 frota.update({"servidor": servidor, "unidade": unidade,
               "device_id": device_id, "auto_update": True})
@@ -341,7 +411,7 @@ frota["heartbeat_segundos"] = 10
 cfg["frota"] = frota
 with open(cfg_path, "w") as f:
     yaml.safe_dump(cfg, f, allow_unicode=True, sort_keys=False)
-print("   config gravado:", cfg_path)
+print("   config gravado:", cfg_path, "modelo=", modelo)
 PY
 chown "$TARGET_USER":"$TARGET_USER" "$APP_DIR/config.yaml"
 
@@ -404,13 +474,15 @@ echo "==================================================================="
 """
 
 
-def _bootstrap_script(servidor: str, device_id: str, nome: str, unidade: str) -> str:
+def _bootstrap_script(servidor: str, device_id: str, nome: str, unidade: str,
+                      placa: str = "pi4", modelo_maquina: str = "ESTATICA_2") -> str:
     return (_BOOTSTRAP
             .replace("__SERVIDOR__", servidor)
             .replace("__DEVICE_ID__", device_id)
             .replace("__NOME__", nome)
             .replace("__UNIDADE__", unidade)
-            .replace("__REPO__", _REPO))
+            .replace("__PLACA__", placa or "pi4")
+            .replace("__MODELO__", modelo_maquina or "ESTATICA_2"))
 
 
 # Script de limpeza servido em GET /uninstall. Roda no Raspberry como:
@@ -601,6 +673,12 @@ def _make_handler(db: FleetDB):
                 self._json({"disponiveis": versoes_disponiveis()})
             elif p.startswith("/api/package/"):
                 versao = p.rsplit("/", 1)[-1]
+                # 'latest' resolve para a versao publicada mais recente (auto-elimina dependencia do github)
+                if versao == "latest":
+                    disp = versoes_disponiveis()
+                    if not disp:
+                        self._json({"erro": "nenhuma versao publicada"}, 404); return
+                    versao = disp[-1]
                 caminho = os.path.join(_PKG_DIR, versao + ".zip")
                 if os.path.exists(caminho):
                     with open(caminho, "rb") as f:
@@ -620,7 +698,9 @@ def _make_handler(db: FleetDB):
                                "text/plain; charset=utf-8")
                     return
                 script = _bootstrap_script(self._base_url(), device_id,
-                                           dev.get("nome") or "", dev.get("unidade") or "")
+                                           dev.get("nome") or "", dev.get("unidade") or "",
+                                           dev.get("placa") or "pi4",
+                                           dev.get("modelo_maquina") or "ESTATICA_2")
                 self._send(200, script.encode("utf-8"), "text/x-shellscript; charset=utf-8")
             elif p in ("/uninstall", "/uninstall/"):
                 # Público: o Pi baixa para limpar tudo antes de reinstalar.
@@ -698,15 +778,23 @@ def _make_handler(db: FleetDB):
                 body = json.loads(self._read().decode("utf-8") or "{}")
                 nome = (body.get("nome") or "").strip()
                 unidade = (body.get("unidade") or "").strip()
+                placa = (body.get("placa") or "pi4").strip().lower()
+                modelo_maquina = (body.get("modelo_maquina") or "ESTATICA_2").strip().upper()
                 if not nome:
-                    self._json({"erro": "informe o nome do equipamento"}, 400)
-                    return
+                    self._json({"erro": "informe o nome do equipamento"}, 400); return
+                if placa not in ("pi3", "pi4", "pi5"):
+                    self._json({"erro": "placa invalida (pi3|pi4|pi5)"}, 400); return
+                if modelo_maquina not in ("ESTATICA_1", "ESTATICA_2", "ESTATICA_LCD",
+                                          "DINAMICA_PI", "DINAMICA_CLP"):
+                    self._json({"erro": "modelo_maquina invalido"}, 400); return
                 device_id = "pi-" + secrets.token_hex(5)
-                db.create_pending_device(device_id, nome, unidade)
+                db.create_pending_device(device_id, nome, unidade, placa, modelo_maquina)
                 base = self._base_url()
                 install_url = f"{base}/install/{device_id}"
-                log.info("Equipamento cadastrado: %s (%s) device_id=%s", nome, unidade, device_id)
+                log.info("Equipamento cadastrado: %s (%s) placa=%s modelo=%s id=%s",
+                         nome, unidade, placa, modelo_maquina, device_id)
                 self._json({"device_id": device_id, "nome": nome, "unidade": unidade,
+                            "placa": placa, "modelo_maquina": modelo_maquina,
                             "install_url": install_url,
                             "install_cmd": f"curl -fsSL {install_url} | sudo bash"})
             elif p.startswith("/api/target"):

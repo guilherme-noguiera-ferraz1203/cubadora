@@ -68,6 +68,13 @@ class FleetDB:
             if "tunnel_pubkey" not in cols:
                 # Chave publica SSH (ed25519) que o Pi usa para abrir o tunel reverso.
                 self._conn.execute("ALTER TABLE device ADD COLUMN tunnel_pubkey TEXT")
+            if "placa" not in cols:
+                # Modelo da placa Raspberry escolhido no cadastro (pi3 | pi4 | pi5).
+                # Influencia os pacotes apt e python instalados pelo bootstrap.
+                self._conn.execute("ALTER TABLE device ADD COLUMN placa TEXT")
+            if "modelo_maquina" not in cols:
+                # Tipo do equipamento (ESTATICA_2, DINAMICA_PI, etc.) gravado no config.yaml.
+                self._conn.execute("ALTER TABLE device ADD COLUMN modelo_maquina TEXT")
             self._conn.commit()
 
     # --------------------------------------------------------------- devices
@@ -129,9 +136,12 @@ class FleetDB:
                 d["estado"] = None
         return d
 
-    def create_pending_device(self, device_id: str, nome: str, unidade: str) -> bool:
+    def create_pending_device(self, device_id: str, nome: str, unidade: str,
+                              placa: str = "", modelo_maquina: str = "") -> bool:
         """Pré-cadastra um equipamento. Ele aparece no painel como 'aguardando instalação'
-        (last_seen NULL) até o primeiro heartbeat. Retorna False se o device_id já existir."""
+        (last_seen NULL) até o primeiro heartbeat. Retorna False se o device_id já existir.
+        `placa` (pi3|pi4|pi5) e `modelo_maquina` (ESTATICA_2, DINAMICA_PI, ...) sao gravados
+        pra customizar o script de instalacao."""
         agora = datetime.now().isoformat()
         with self._lock:
             existe = self._conn.execute("SELECT device_id FROM device WHERE device_id=?",
@@ -139,8 +149,9 @@ class FleetDB:
             if existe:
                 return False
             self._conn.execute(
-                "INSERT INTO device (device_id,nome,unidade,primeiro_seen) VALUES (?,?,?,?)",
-                (device_id, nome, unidade, agora))
+                "INSERT INTO device (device_id,nome,unidade,placa,modelo_maquina,primeiro_seen) "
+                "VALUES (?,?,?,?,?,?)",
+                (device_id, nome, unidade, placa, modelo_maquina, agora))
             self._conn.commit()
         return True
 
