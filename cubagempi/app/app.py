@@ -547,10 +547,19 @@ class App:
         return "Logo salva"
 
     def ler_logo(self) -> bytes | None:
-        if not self.tem_logo():
-            return None
-        with open(self._logo_file(), "rb") as f:
-            return f.read()
+        # 1) Logo customizado em data/logo.png (upload do usuario via UI).
+        if self.tem_logo():
+            with open(self._logo_file(), "rb") as f:
+                return f.read()
+        # 2) Fallback: logo Vestra embutido no pacote (cubagempi/assets/logo-vestra.png).
+        #    Garante identidade visual da Vestra desde o primeiro boot, sem upload manual.
+        import os as _os
+        emb = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+                            "assets", "logo-vestra.png")
+        if _os.path.exists(emb):
+            with open(emb, "rb") as f:
+                return f.read()
+        return None
 
     # ----------------------------------------------------------------- integração (API)
     def get_integracao_config(self) -> list[dict]:

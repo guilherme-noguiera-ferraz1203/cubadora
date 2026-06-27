@@ -136,6 +136,16 @@ class FleetDB:
                 d["estado"] = None
         return d
 
+    def delete_device(self, device_id: str) -> dict:
+        """Remove o equipamento + TODOS os dados associados (events, commands, chave do tunel).
+        Operacao irreversivel — botao 'Remover equipamento' do painel."""
+        with self._lock:
+            n_dev = self._conn.execute("DELETE FROM device WHERE device_id=?", (device_id,)).rowcount
+            n_evt = self._conn.execute("DELETE FROM event WHERE device_id=?", (device_id,)).rowcount
+            n_cmd = self._conn.execute("DELETE FROM command WHERE device_id=?", (device_id,)).rowcount
+            self._conn.commit()
+        return {"device": n_dev, "eventos": n_evt, "comandos": n_cmd}
+
     def create_pending_device(self, device_id: str, nome: str, unidade: str,
                               placa: str = "", modelo_maquina: str = "") -> bool:
         """Pré-cadastra um equipamento. Ele aparece no painel como 'aguardando instalação'

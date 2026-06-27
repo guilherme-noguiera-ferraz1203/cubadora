@@ -27,38 +27,78 @@ def versoes_disponiveis() -> list[str]:
 
 
 _PAGE = r"""<!doctype html><html lang=pt-BR><head><meta charset=utf-8>
-<meta name=viewport content="width=device-width,initial-scale=1"><title>Frota — Cubagem</title>
+<meta name=viewport content="width=device-width,initial-scale=1"><title>Frota Vestra — Cubagem</title>
+<link rel="icon" type="image/png" href="/assets/logo-vestra.png">
 <style>
+:root{
+  /* Identidade Vestra Logística */
+  --vestra-roxo:#4d298c;        /* primaria */
+  --vestra-roxo-esc:#27154d;    /* roxo escuro (texto/borders) */
+  --vestra-verde:#bff175;       /* acento (sucesso, online) */
+  --vestra-verde-esc:#7ca84a;
+  --vestra-bg:#f7f4fb;          /* fundo claro com tom de roxo */
+  --vestra-card:#ffffff;
+  --vestra-line:#e8dff5;        /* borders sutis em tom de roxo */
+  --vestra-txt:#1f1b2e;
+  --vestra-mut:#6b6884;
+  --vestra-err:#b91c1c;
+  --vestra-warn:#b45309;
+}
 *{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',system-ui,Arial,sans-serif}
-body{background:#eef2f7;color:#0f172a;padding:18px}
-h1{font-size:22px;margin-bottom:4px}.sub{color:#64748b;margin-bottom:16px}
-.bar{background:#fff;border:1px solid #dbe3ec;border-radius:12px;padding:14px;margin-bottom:16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
-input,select,button{padding:9px 12px;border-radius:8px;border:1px solid #cbd5e1;font-size:14px}
-label{display:block;font-size:13px;font-weight:600;color:#334155;margin:10px 0 4px}
+body{background:var(--vestra-bg);color:var(--vestra-txt);padding:0}
+.header{background:linear-gradient(135deg,var(--vestra-roxo) 0%,var(--vestra-roxo-esc) 100%);color:#fff;padding:14px 22px;display:flex;align-items:center;gap:14px;box-shadow:0 2px 8px rgba(77,41,140,.18)}
+.header img{height:36px;background:#fff;padding:5px 8px;border-radius:6px}
+.header .ttl{font-size:18px;font-weight:700;letter-spacing:.3px}
+.header .sub2{font-size:13px;opacity:.85;margin-left:auto}
+.wrap{padding:18px 22px}
+h1{font-size:20px;margin-bottom:4px;color:var(--vestra-roxo-esc)}
+.sub{color:var(--vestra-mut);margin-bottom:16px;font-size:14px}
+.bar{background:var(--vestra-card);border:1px solid var(--vestra-line);border-radius:12px;padding:14px;margin-bottom:16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+input,select,button{padding:9px 12px;border-radius:8px;border:1px solid #d4cae3;font-size:14px}
+label{display:block;font-size:13px;font-weight:600;color:var(--vestra-roxo-esc);margin:10px 0 4px}
 input{width:100%}
-.cmd{background:#0f172a;color:#e2e8f0;border-radius:8px;padding:12px;font-family:Consolas,monospace;font-size:13px;word-break:break-all;margin:8px 0}
-.hint{color:#64748b;font-size:13px;line-height:1.5}
-button{background:#2563eb;color:#fff;border:none;cursor:pointer;font-weight:600}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
-.dev{background:#fff;border:1px solid #dbe3ec;border-radius:12px;padding:14px;cursor:pointer}
-.dev:hover{border-color:#2563eb}
+.cmd{background:var(--vestra-roxo-esc);color:#e8dff5;border-radius:8px;padding:12px;font-family:Consolas,monospace;font-size:13px;word-break:break-all;margin:8px 0}
+.hint{color:var(--vestra-mut);font-size:13px;line-height:1.5}
+button{background:var(--vestra-roxo);color:#fff;border:none;cursor:pointer;font-weight:600;transition:filter .15s}
+button:hover{filter:brightness(1.1)}
+button.acento{background:var(--vestra-verde-esc);color:#1a3008}
+button.acento:hover{background:var(--vestra-verde);color:#27154d}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:14px}
+.dev{background:var(--vestra-card);border:1px solid var(--vestra-line);border-radius:12px;padding:14px;cursor:pointer;transition:all .15s;box-shadow:0 1px 3px rgba(39,21,77,.04)}
+.dev:hover{border-color:var(--vestra-roxo);box-shadow:0 4px 12px rgba(77,41,140,.12);transform:translateY(-1px)}
 .dev .top{display:flex;justify-content:space-between;align-items:center}
-.dev .nome{font-weight:700;font-size:16px}.dev .uni{color:#64748b;font-size:13px}
+.dev .nome{font-weight:700;font-size:16px;color:var(--vestra-roxo-esc)}.dev .uni{color:var(--vestra-mut);font-size:13px}
 .dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px}
 .badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:12px;font-weight:700}
-.b-ok{background:#dcfce7;color:#15803d}.b-old{background:#fee2e2;color:#b91c1c}.b-off{background:#f1f5f9;color:#64748b}
-.kv{color:#475569;font-size:13px;margin-top:8px}
-#modal,#regmodal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;padding:20px}
-#modal .box{background:#fff;border-radius:14px;max-width:760px;width:100%;max-height:85vh;overflow:auto;padding:20px}
-#regmodal .box{background:#fff;border-radius:14px;max-width:560px;width:100%;max-height:85vh;overflow:auto;padding:20px}
-.ev{border-bottom:1px solid #eef2f7;padding:7px 0;font-size:13px;font-family:Consolas,monospace}
-.ev .err{color:#b91c1c}.ev .warn{color:#b45309}
+.b-ok{background:#e7f7d5;color:#3d6818}
+.b-old{background:#fee2e2;color:#b91c1c}
+.b-off{background:#ede5f7;color:#6b5b8a}
+.kv{color:#473d5e;font-size:13px;margin-top:8px}
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-bottom:14px}
+.kpi{background:linear-gradient(135deg,#fff 0%,#fbf7ff 100%);border:1px solid var(--vestra-line);border-radius:10px;padding:12px}
+.kpi .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--vestra-mut);font-weight:600}
+.kpi .val{font-size:22px;font-weight:800;color:var(--vestra-roxo);line-height:1.2;margin-top:4px}
+.kpi .sub3{font-size:11px;color:var(--vestra-mut);margin-top:2px}
+.kpi.alerta .val{color:var(--vestra-err)}
+.kpi.aviso .val{color:var(--vestra-warn)}
+.kpi.sucesso .val{color:var(--vestra-verde-esc)}
+#modal,#regmodal{position:fixed;inset:0;background:rgba(39,21,77,.55);display:none;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(2px)}
+#modal .box{background:var(--vestra-card);border-radius:14px;max-width:820px;width:100%;max-height:90vh;overflow:auto;padding:22px}
+#regmodal .box{background:var(--vestra-card);border-radius:14px;max-width:580px;width:100%;max-height:88vh;overflow:auto;padding:22px}
+.ev{border-bottom:1px solid var(--vestra-line);padding:7px 0;font-size:13px;font-family:Consolas,monospace}
+.ev .err{color:var(--vestra-err);font-weight:600}.ev .warn{color:var(--vestra-warn);font-weight:600}
+h3.sec{color:var(--vestra-roxo-esc);font-size:14px;text-transform:uppercase;letter-spacing:.5px;margin:14px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--vestra-line)}
 </style></head><body>
-<h1>Frota de equipamentos</h1><div class="sub" id="resumo">—</div>
+<div class="header">
+ <img src="/assets/logo-vestra.png" alt="Vestra" onerror="this.style.display='none'">
+ <div class="ttl">Cubadora · Painel da Frota</div>
+ <div class="sub2" id="resumo">—</div>
+</div>
+<div class="wrap">
 <div class="bar">
  <b>Versões publicadas:</b> <span class="badge b-ok" id="nver">0</span>
- <span style="color:#64748b;font-size:13px">Publique com <code>deploy/publish.py</code>. Para atualizar/rollback, clique no equipamento.</span>
- <button onclick="abrirCadastro()" style="background:#16a34a;margin-left:auto">➕ Cadastrar equipamento</button>
+ <span style="color:var(--vestra-mut);font-size:13px">Publique com <code>deploy/publish.py</code>. Para atualizar/rollback, clique no equipamento.</span>
+ <button onclick="abrirCadastro()" class="acento" style="margin-left:auto">➕ Cadastrar equipamento</button>
 </div>
 <div class="grid" id="grid"></div>
 <div id="modal" onclick="if(event.target.id==='modal')fecha()"><div class="box" id="box"></div></div>
@@ -97,23 +137,60 @@ function resumirEventos(ev){
 }
 function statusCmd(s){return {pendente:'⏳ na fila',enviado:'📨 enviado',executado:'✅ ok',erro:'❌ erro'}[s]||s}
 function ksec(s){if(s<60)return s+'s';if(s<3600)return Math.round(s/60)+'min';return Math.round(s/3600)+'h'}
-function snapshot(est){
- if(!est)return '<p class="hint">Aguardando primeiro snapshot do equipamento…</p>';
- const sis=est.sistema||{}, st=est.status||{}, di=est.diagnostico;
- const card=(t,v,extra)=>`<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px;min-width:120px"><div style="color:#64748b;font-size:11px;text-transform:uppercase">${t}</div><div style="font-weight:700;font-size:18px">${v}</div>${extra?'<div style="font-size:11px;color:#64748b">'+extra+'</div>':''}</div>`;
- let html='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">';
- if(sis.cpu_temp!=null)html+=card('CPU °C',sis.cpu_temp,sis.modelo_pi||'');
- if(sis.uptime)html+=card('Uptime',sis.uptime,'');
- if(sis.disco_livre_gb!=null)html+=card('Disco livre',sis.disco_livre_gb+' GB','de '+(sis.disco_total_gb||'?')+' GB');
- if(sis.ip)html+=card('IP',sis.ip,sis.tipo_conexao||'');
- if(st.status_texto)html+=card('Estado',st.status_texto,st.aferido?'aferido':'NAO aferido');
- if(st.integracao_nome)html+=card('Integração',st.integracao_nome,st.integracao_habilitada?'on':'off');
- const tot=st.totalizacao||{};if(tot.volume!=null)html+=card('Totalização',tot.volume+' m³',tot.quantidade+' vol');
+function kpi(lbl,val,sub,clr){
+ const cls=clr||'';
+ return `<div class="kpi ${cls}"><div class="lbl">${lbl}</div><div class="val">${val}</div>${sub?'<div class="sub3">'+sub+'</div>':''}</div>`;
+}
+function fmtBytes(g){if(g==null)return '-';if(g<1)return Math.round(g*1024)+' MB';return g.toFixed(1)+' GB'}
+function tempoCorrido(iso){if(!iso)return '-';const s=(Date.now()-new Date(iso).getTime())/1000;if(s<60)return Math.round(s)+'s';if(s<3600)return Math.round(s/60)+'min';if(s<86400)return Math.round(s/3600)+'h';const d=Math.floor(s/86400);return d+'d '+Math.round((s-d*86400)/3600)+'h'}
+function snapshot(dev){
+ const est=dev.estado||{}, sis=est.sistema||{}, st=est.status||{}, di=est.diagnostico;
+ const p=dev.producao||{}, tot=st.totalizacao||p; // fallback p/ producao do device card
+ const onl=online(dev.last_seen);
+ let html='';
+
+ // --- Cards principais (sempre): Conectividade + Produção ---
+ html+='<div class="kpi-grid">';
+ html+=kpi('Status',onl?'🟢 ONLINE':'🔴 OFFLINE',
+   onl?'visto '+hatempo(dev.last_seen):'última vez '+hatempo(dev.last_seen),
+   onl?'sucesso':'alerta');
+ html+=kpi('Cadastrado há',tempoCorrido(dev.primeiro_seen),(dev.primeiro_seen||'').replace('T',' ').substr(0,19));
+ if(sis.uptime)html+=kpi('Pi ligado há',sis.uptime,sis.modelo_pi||'');
+ html+=kpi('Volumes cubados',(p.volumes||tot.quantidade||0).toLocaleString('pt-BR'),
+   (p.vol_h||0)+' vol/h');
+ html+=kpi('Totalização',
+   ((tot.volume||p.totalizacao_volume||0)).toFixed(3)+' m³',
+   ((tot.peso||p.totalizacao_peso||0)).toFixed(1)+' kg');
+ const inOK=p.integracao_ok||0, inErr=p.integracao_erro||0;
+ html+=kpi('Integração',inOK+' OK',inErr>0?inErr+' com erro':'sem erros',inErr>0?'alerta':(inOK>0?'sucesso':''));
+ const errCub=p.erro_cubagem||0;
+ if(errCub>0)html+=kpi('Erros cubagem',errCub,'falhas de leitura','alerta');
+
+ // --- Hardware (do snapshot) ---
+ if(sis.cpu_temp!=null){
+  const cor=sis.cpu_temp>=75?'alerta':(sis.cpu_temp>=65?'aviso':'sucesso');
+  html+=kpi('Temperatura CPU',sis.cpu_temp+' °C',sis.cpu_temp>=75?'crítica':(sis.cpu_temp>=65?'alta':'normal'),cor);
+ }
+ if(sis.disco_livre_gb!=null){
+  const pct=sis.disco_total_gb?Math.round(100*sis.disco_livre_gb/sis.disco_total_gb):null;
+  const cor=pct!=null&&pct<10?'alerta':(pct!=null&&pct<25?'aviso':'');
+  html+=kpi('Disco livre',fmtBytes(sis.disco_livre_gb),pct!=null?pct+'% de '+fmtBytes(sis.disco_total_gb):'',cor);
+ }
+ if(sis.ip)html+=kpi('Rede',sis.ip,sis.tipo_conexao||'-');
+ if(st.status_texto)html+=kpi('Modo atual',st.status_texto,st.aferido?'✓ aferido':'⚠ NÃO aferido',st.aferido?'':'aviso');
  html+='</div>';
+
+ // --- Diagnóstico (se rodado) ---
  if(di){
-  const ok=di.apto_producao?'✅ apto':'⚠️ com problemas';
-  const sensores=(di.sensores||[]).map(s=>(s.respondendo?'✓':'✗')+s.endereco).join(' ');
-  html+=`<div class="hint">Último diagnóstico: <b>${ok}</b> · sensores: ${sensores||'-'} · balança: ${di.balanca?.ok?'✓ '+di.balanca.peso+'kg':'✗'}${di.ts?' · '+(di.ts||'').replace('T',' ').substr(11,8):''}</div>`;
+  const ok=di.apto_producao;
+  const sensores=(di.sensores||[]).map(s=>(s.respondendo?'🟢':'🔴')+'#'+s.endereco).join(' ');
+  const bal=di.balanca?.ok?('🟢 '+di.balanca.peso+'kg'):'🔴 sem resposta';
+  html+=`<div class="hint" style="margin-bottom:10px;padding:10px;background:${ok?'#e7f7d5':'#fef3c7'};border-radius:8px">
+   <b>${ok?'✅ Equipamento apto para produção':'⚠️ Diagnóstico com problemas'}</b> · sensores: ${sensores||'(sem leitura)'} · balança: ${bal}
+   ${di.ts?'<span style="color:var(--vestra-mut)"> · '+(di.ts||'').replace('T',' ').substr(0,19)+'</span>':''}
+  </div>`;
+ } else {
+  html+='<p class="hint" style="font-style:italic">Clique em "🩺 Rodar diagnóstico" abaixo para verificar sensores e balança.</p>';
  }
  return html;
 }
@@ -128,12 +205,20 @@ async function cmdConfig(id){const sec=document.getElementById('cfgsec').value.t
 async function cmdConfigKiosk(id,on){await cmd(id,'config',{secao:'kiosk',dados:{modo_producao:on}})}
 async function limparHist(id){if(!confirm('Apagar TODO o histórico de avisos/erros deste equipamento?'))return;
  const r=await post('/api/events/clear',{device_id:id}); alert((r.removidos||0)+' eventos removidos'); detalhe(id)}
+async function removerEquip(id,nome){
+ if(!confirm('Remover '+(nome||id)+' da frota?\n\nIsso apaga PERMANENTEMENTE:\n- O equipamento\n- Todo o histórico de eventos\n- Todos os comandos\n- A chave do túnel SSH'))return;
+ if(!confirm('Confirma de novo? Essa ação é IRREVERSÍVEL.'))return;
+ const r=await (await fetch('/api/device/'+id+'/delete',{method:'POST'})).json();
+ if(r.erro){alert('Erro: '+r.erro);return}
+ alert('Equipamento removido.');
+ fecha(); carregar();
+}
 async function detalhe(id){const d=await getj('/api/device/'+id);const dev=d.device,ev=d.eventos||[],cmds=d.comandos||[];const onl=online(dev.last_seen);
  const optsVer=['<option value="">(não atualizar)</option>'].concat(VERSOES.map(v=>'<option value="'+v+'"'+(v===(dev.versao_alvo||'')?' selected':'')+'>'+v+'</option>')).join('');
  document.getElementById('box').innerHTML=`<h2 style="margin-bottom:4px">${esc(dev.nome||id)}</h2>
   <div style="color:#64748b;margin-bottom:6px"><span class="dot" style="background:${onl?'#22c55e':'#cbd5e1'}"></span><b style="color:${onl?'#15803d':'#64748b'}">${onl?'online':'offline'}</b> · visto ${hatempo(dev.last_seen)} · ${esc(dev.unidade||'sem unidade')} · ${esc(dev.modelo||'')} · versão ${esc(dev.versao||'?')}</div>
 
-  <h3 style="margin:12px 0 6px">Versão &amp; atualização</h3>
+  <h3 class="sec">Versão &amp; atualização</h3>
   <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
    <span>atual: <b>${esc(dev.versao||'?')}</b></span>
    <span style="color:#64748b">alvo: ${dev.versao_alvo?esc(dev.versao_alvo):'(nenhum)'}</span>
@@ -142,10 +227,10 @@ async function detalhe(id){const d=await getj('/api/device/'+id);const dev=d.dev
   </div>
   ${VERSOES.length?'':'<div class="hint" style="margin-top:4px">Nenhuma versão publicada ainda — publique com <code>deploy/publish.py</code>.</div>'}
 
-  <h3 style="margin:12px 0 6px">Estado do equipamento</h3>
-  ${snapshot(dev.estado)}
+  <h3 class="sec">Estado do equipamento</h3>
+  ${snapshot(dev)}
 
-  <h3 style="margin:12px 0 6px">Controles</h3>
+  <h3 class="sec">Controles</h3>
   <div style="display:flex;gap:8px;flex-wrap:wrap">
    <button onclick="window.open('/device/${id}/','_blank')" style="background:#7c3aed" ${dev.tunnel_port?'':'disabled title="Tunel nao registrado — atualize/reinstale o equipamento p/ esta versao"'}>🖥️ Abrir tela do equipamento</button>
    <button onclick="cmd('${id}','restart_app')" style="background:#f59e0b">⚡ Reiniciar app</button>
@@ -155,7 +240,7 @@ async function detalhe(id){const d=await getj('/api/device/'+id);const dev=d.dev
    <button onclick="cmd('${id}','shutdown')" style="background:#475569">⏻ Desligar</button>
   </div>
 
-  <h3 style="margin:12px 0 6px">Modo produção (lockdown da tela local)</h3>
+  <h3 class="sec">Modo produção (lockdown da tela local)</h3>
   <div class="hint" style="margin-bottom:6px">Quando ligado, a tela do equipamento mostra <b>SÓ a operação</b>: as abas Calibrar/Configuração/Diagnóstico/Sistema somem (e ficam liberadas só pelo painel da VPS).</div>
   <div style="display:flex;gap:8px;flex-wrap:wrap">
    <button onclick="cmdConfigKiosk('${id}',true)" style="background:#16a34a">🔒 Ligar modo produção</button>
@@ -163,22 +248,25 @@ async function detalhe(id){const d=await getj('/api/device/'+id);const dev=d.dev
   </div>
   ${onl?'':'<div class="hint" style="color:#b45309;margin-top:6px">Offline — o comando fica na fila e roda quando reconectar.</div>'}
 
-  <h3 style="margin:14px 0 6px">Comando manual</h3>
+  <h3 class="sec">Comando manual</h3>
   <div style="display:flex;gap:8px"><input id="cmdtxt" placeholder="texto do dispatcher (ex.: *tara*, *r*, *config*)" style="flex:1"><button onclick="cmdTexto('${id}')">Enviar</button></div>
 
-  <h3 style="margin:14px 0 6px">Configuração remota</h3>
+  <h3 class="sec">Configuração remota</h3>
   <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
    <div style="width:150px"><label>Seção</label><input id="cfgsec" placeholder="ex.: frota"></div>
    <div style="flex:1;min-width:200px"><label>Dados (JSON)</label><input id="cfgdados" placeholder='{"heartbeat_segundos":10}'></div>
    <button onclick="cmdConfig('${id}')">Aplicar</button>
   </div>
 
-  ${cmds.length?`<h3 style="margin:14px 0 6px">Comandos recentes</h3>${cmds.map(c=>`<div class="ev">${statusCmd(c.status)} <b>${esc(c.tipo)}</b>${c.parametros&&c.parametros.texto?' '+esc(c.parametros.texto):''}${c.resultado?' — '+esc(c.resultado):''} <span style="color:#94a3b8">${(c.ack_em||c.criado_em||'').replace('T',' ').substr(11,8)}</span></div>`).join('')}`:''}
+  ${cmds.length?`<h3 class="sec">Comandos recentes</h3>${cmds.map(c=>`<div class="ev">${statusCmd(c.status)} <b>${esc(c.tipo)}</b>${c.parametros&&c.parametros.texto?' '+esc(c.parametros.texto):''}${c.resultado?' — '+esc(c.resultado):''} <span style="color:#94a3b8">${(c.ack_em||c.criado_em||'').replace('T',' ').substr(11,8)}</span></div>`).join('')}`:''}
 
-  <h3 style="margin:14px 0 6px">Atividade (avisos e erros) <button onclick="limparHist('${id}')" style="background:#e2e8f0;color:#0f172a;font-size:12px;padding:4px 8px;margin-left:8px">🧹 Limpar histórico</button></h3>
+  <h3 class="sec">Atividade (avisos e erros) <button onclick="limparHist('${id}')" style="background:#e2e8f0;color:#0f172a;font-size:12px;padding:4px 8px;margin-left:8px">🧹 Limpar histórico</button></h3>
   ${resumirEventos(ev)}
 
-  <div style="margin-top:16px"><button onclick="fecha()" style="background:#e2e8f0;color:#0f172a">Fechar</button></div>`;
+  <div style="margin-top:20px;padding-top:16px;border-top:1px solid #eee;display:flex;justify-content:space-between;align-items:center">
+   <button onclick="removerEquip('${id}', ${JSON.stringify(dev.nome||'')})" style="background:#fee2e2;color:#991b1b;font-size:13px;padding:8px 12px">🗑️ Remover equipamento</button>
+   <button onclick="fecha()" style="background:#e2e8f0;color:#0f172a">Fechar</button>
+  </div>`;
  document.getElementById('modal').style.display='flex';
 }
 function fecha(){document.getElementById('modal').style.display='none'}
@@ -247,7 +335,7 @@ function copiar(){const b=event.target;const t=document.getElementById('cmdTxt')
  const ok=()=>{const o=b.textContent;b.textContent='✅ Copiado';setTimeout(()=>b.textContent=o,1500)};
  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(ok,ok)}else{ok()}}
 carregar();setInterval(carregar,5000);
-</script></body></html>"""
+</script></div></body></html>"""
 
 
 # URL do repositório de código do equipamento (clone público no Pi durante a instalação).
@@ -800,6 +888,22 @@ def _make_handler(db: FleetDB):
             p = u.path
             if p == "/" or p.startswith("/index"):
                 self._send(200, _PAGE.encode("utf-8"), "text/html; charset=utf-8")
+            elif p.startswith("/assets/"):
+                # Assets estaticos (logo Vestra, etc.). Risco: NENHUM (so leitura de arquivo
+                # no diretorio assets/ embarcado na imagem; nada toca no SO do host).
+                nome = p.split("/")[-1]
+                if "/" in nome or "\\" in nome or ".." in nome:
+                    self._json({"erro":"path invalido"}, 400); return
+                caminho = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", nome)
+                if os.path.exists(caminho) and os.path.isfile(caminho):
+                    ctype = "image/png" if nome.endswith(".png") else \
+                            "image/svg+xml" if nome.endswith(".svg") else \
+                            "image/jpeg" if nome.endswith((".jpg",".jpeg")) else \
+                            "image/x-icon" if nome.endswith(".ico") else "application/octet-stream"
+                    with open(caminho, "rb") as f:
+                        self._send(200, f.read(), ctype)
+                else:
+                    self._json({"erro":"asset nao encontrado"}, 404)
             elif p.startswith("/api/devices"):
                 self._json(db.list_devices())
             elif p.startswith("/api/device/") and p.endswith("/tunnel"):
@@ -914,6 +1018,19 @@ def _make_handler(db: FleetDB):
                     self._json({"erro": "informe device_id"}, 400); return
                 n = db.clear_events(did)
                 self._json({"removidos": n})
+            elif p.startswith("/api/device/") and p.endswith("/delete"):
+                # Remove o equipamento INTEIRO (device + events + commands + chave do tunel).
+                # Protegido pela senha do painel (nginx auth_basic).
+                did = p.split("/")[3]
+                if not db.get_device(did):
+                    self._json({"erro": "device nao encontrado"}, 404); return
+                n = db.delete_device(did)
+                # Invalida a chave SSH desse device no container sshd (reescreve authorized_keys
+                # SEM a linha do device removido — alocacao de porta tambem fica livre).
+                _rewrite_authorized_keys(db)
+                log.info("Equipamento removido: %s (device=%s, events=%s, cmds=%s)",
+                         did, n["device"], n["eventos"], n["comandos"])
+                self._json({"ok": True, "removidos": n})
             elif p.startswith("/api/command"):
                 # Protegido pela senha do painel (nginx). Enfileira um comando para o equipamento.
                 body = json.loads(self._read().decode("utf-8") or "{}")

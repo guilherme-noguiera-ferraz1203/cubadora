@@ -20,11 +20,12 @@ log = logging.getLogger(__name__)
 # ───────────────────────────── Design system (CSS comum, tema claro/escuro) ─────────────────────────────
 _CSS = """<script>document.documentElement.dataset.tema='__TEMA__'</script><style>
 *{box-sizing:border-box;margin:0;padding:0}
-:root{--bg:#0b1220;--panel:#111a2e;--panel2:#16213c;--line:#243049;--txt:#e8edf7;--mut:#94a3b8;--inp:#0a1426;
- --ok:#16a34a;--ok2:#22c55e;--warn:#d97706;--err:#dc2626;--acc:#2563eb;--acc2:#3b82f6;
- --vok:#4ade80;--vinfo:#60a5fa;--verr:#f87171}
-html[data-tema="claro"]{--bg:#eef2f7;--panel:#ffffff;--panel2:#f4f7fb;--line:#dbe3ec;--txt:#0f172a;--mut:#5b6b7f;--inp:#ffffff;
- --acc:#2563eb;--acc2:#1d4ed8;--vok:#15803d;--vinfo:#1d4ed8;--verr:#dc2626}
+/* Identidade visual Vestra Logistica (roxo #4d298c primario, verde #bff175 acento). */
+:root{--bg:#1a0f33;--panel:#27154d;--panel2:#321c5e;--line:#3d2b66;--txt:#f0e7ff;--mut:#a89dc4;--inp:#170a2a;
+ --ok:#7ca84a;--ok2:#bff175;--warn:#d97706;--err:#dc2626;--acc:#4d298c;--acc2:#6b3fb3;
+ --vok:#bff175;--vinfo:#9b7fd1;--verr:#f87171}
+html[data-tema="claro"]{--bg:#f7f4fb;--panel:#ffffff;--panel2:#fbf7ff;--line:#e8dff5;--txt:#27154d;--mut:#6b6884;--inp:#ffffff;
+ --acc:#4d298c;--acc2:#27154d;--vok:#5d8a30;--vinfo:#4d298c;--verr:#b91c1c}
 body{font-family:'Segoe UI',system-ui,Arial,sans-serif;background:var(--bg);color:var(--txt);min-height:100vh}
 a{color:var(--acc2);text-decoration:none}
 .nav{display:flex;align-items:center;gap:18px;background:var(--panel);padding:10px 18px;border-bottom:1px solid var(--line)}
@@ -113,11 +114,14 @@ _DASH = _CSS + """
 .prod .b .v{font-size:28px;font-weight:800} .prod .b .l{color:var(--mut);font-size:11px;text-transform:uppercase}
 .foot{display:flex;gap:18px;flex-wrap:wrap;color:var(--mut);font-size:13px;padding:10px 18px;border-top:1px solid var(--line);background:var(--panel)}
 .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px}
-#splash{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:18px;z-index:99;transition:opacity .6s}
-#splash img{max-width:40vw;max-height:40vh} #splash .t{font-size:22px;color:var(--mut)}
+#splash{position:fixed;inset:0;background:linear-gradient(135deg,#4d298c 0%,#27154d 100%);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:24px;z-index:99;transition:opacity .6s}
+#splash img{max-width:36vw;max-height:30vh;background:#fff;padding:18px 28px;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.3)}
+#splash .t{font-size:22px;color:#bff175;font-weight:600;letter-spacing:.5px}
+#splash .l{width:48px;height:48px;border:4px solid rgba(191,241,117,.25);border-top-color:#bff175;border-radius:50%;animation:rot 1s linear infinite}
+@keyframes rot{to{transform:rotate(360deg)}}
 </style>
 """ + _nav("dash") + """
-<div id="splash"><img src="/logo" onerror="this.style.display='none'"><div class="t" id="splashNome">Iniciando…</div></div>
+<div id="splash"><img src="/logo" onerror="this.style.display='none'"><div class="l"></div><div class="t" id="splashNome">Iniciando o sistema…</div></div>
 <div class="wrap">
  <div id="banner" class="banner" style="background:#1f2937">—</div>
  <div class="g3">
