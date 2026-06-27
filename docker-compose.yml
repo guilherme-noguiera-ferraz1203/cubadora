@@ -26,3 +26,14 @@ services:
       - ./tunnel-keys:/tunnel-keys:ro
       # Host keys persistentes (sobrevivem a rebuilds; Pi nao vai dar "host key changed")
       - ./sshd-host-keys:/etc/ssh/host_keys
+
+  # Preview da UI do device em modo SIMULADO. Roda o cubagempi sem hardware real
+  # para o admin visualizar a tela do kiosk pelo navegador (cubadora.../preview/).
+  # Container isolado; nao influencia equipamentos reais.
+  cubadora-preview:
+    build:
+      context: .
+      dockerfile: deploy/preview/Dockerfile
+    image: cubadora-preview:latest
+    container_name: cubadora-preview
+    restart: unless-stopped

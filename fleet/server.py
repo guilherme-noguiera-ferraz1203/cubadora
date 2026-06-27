@@ -98,7 +98,8 @@ h3.sec{color:var(--vestra-roxo-esc);font-size:14px;text-transform:uppercase;lett
 <div class="bar">
  <b>Versões publicadas:</b> <span class="badge b-ok" id="nver">0</span>
  <span style="color:var(--vestra-mut);font-size:13px">Publique com <code>deploy/publish.py</code>. Para atualizar/rollback, clique no equipamento.</span>
- <button onclick="abrirCadastro()" class="acento" style="margin-left:auto">➕ Cadastrar equipamento</button>
+ <button onclick="window.open('/preview/','_blank')" style="margin-left:auto" title="Ver como a tela do equipamento (kiosk) aparece — modo simulado, sem hardware">👀 Preview da tela</button>
+ <button onclick="abrirCadastro()" class="acento">➕ Cadastrar equipamento</button>
 </div>
 <div class="grid" id="grid"></div>
 <div id="modal" onclick="if(event.target.id==='modal')fecha()"><div class="box" id="box"></div></div>
@@ -821,6 +822,51 @@ def _make_handler(db: FleetDB):
             host = self.headers.get("Host") or self.headers.get("X-Forwarded-Host") or "localhost"
             return f"{proto}://{host}"
 
+        def _preview_proxy(self):
+            """Reverse proxy /preview/<path>  ->  http://cubadora-preview:8080/<path>.
+            Container preview roda o cubagempi em modo SIMULADO (sem hardware real) — serve
+            a UI/UX exata do kiosk para visualizacao no navegador. Auth pelo nginx central."""
+            parts = self.path.split("/", 2)   # ['', 'preview', '<resto>?qs']
+            resto = "/" + (parts[2] if len(parts) > 2 else "")
+            url = f"http://cubadora-preview:8080{resto}"
+            data = self._read() if self.command in ("POST", "PUT", "PATCH") else None
+            headers = {k: v for k, v in self.headers.items()
+                       if k.lower() not in ("host", "content-length", "authorization", "connection")}
+            prefix = "/preview"
+            try:
+                req = urllib.request.Request(url, data=data, headers=headers, method=self.command)
+                with urllib.request.urlopen(req, timeout=20) as resp:
+                    body = resp.read()
+                    ctype = resp.headers.get("Content-Type", "") or ""
+                    if any(t in ctype for t in ("text/html", "javascript", "text/css")):
+                        try:
+                            txt = body.decode("utf-8")
+                            for atr in ("href", "src", "action"):
+                                for q in ('"', "'"):
+                                    txt = txt.replace(f'{atr}={q}/', f'{atr}={q}{prefix}/')
+                            rotas = ("api/", "logo", "calibrar", "config", "diagnostico", "sistema")
+                            for r in rotas:
+                                for q in ('"', "'"):
+                                    txt = txt.replace(f'{q}/{r}', f'{q}{prefix}/{r}')
+                            for bad in (prefix + '/http', prefix + '/https'):
+                                txt = txt.replace(bad, '/' + bad[len(prefix)+1:])
+                            body = txt.encode("utf-8")
+                        except UnicodeDecodeError:
+                            pass
+                    self.send_response(resp.status)
+                    for h, v in resp.headers.items():
+                        if h.lower() in ("transfer-encoding", "connection", "content-length"): continue
+                        self.send_header(h, v)
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+            except urllib.error.HTTPError as e:
+                b = e.read() or f"<h3>Erro {e.code} do preview</h3>".encode()
+                self._send(e.code, b, e.headers.get("Content-Type", "text/plain"))
+            except Exception as exc:  # noqa: BLE001
+                self._send(502, f"<h3>Preview indisponivel: {exc}</h3>".encode(),
+                           "text/html; charset=utf-8")
+
         def _tunnel_proxy(self, db):
             """Reverse proxy /device/<id>/<path>  ->  http://cubadora-sshd:<tunnel_port>/<path>.
             A request ja chega autenticada pelo nginx central (auth_basic do painel).
@@ -941,6 +987,9 @@ def _make_handler(db: FleetDB):
                         self._send(200, f.read(), "application/zip")
                 else:
                     self._json({"erro": "pacote não encontrado"}, 404)
+            elif p == "/preview" or p.startswith("/preview/"):
+                # Preview da UI do device em modo simulado (cubadora-preview container).
+                self._preview_proxy()
             elif p.startswith("/device/"):
                 # Proxy reverso HTTP para a UI do equipamento (atras de auth_basic do nginx).
                 # /device/<id>/<resto>  ->  http://cubadora-sshd:<tunnel_port>/<resto>
@@ -968,6 +1017,8 @@ def _make_handler(db: FleetDB):
         def do_POST(self):
             u = urlparse(self.path)
             p = u.path
+            if p == "/preview" or p.startswith("/preview/"):
+                self._preview_proxy(); return
             if p.startswith("/device/"):
                 self._tunnel_proxy(db); return
             if p.startswith("/api/heartbeat"):
