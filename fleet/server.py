@@ -330,10 +330,162 @@ APP_DIR="$APP_BASE/python"
 # Detecta SO p/ escolher entre 'chromium-browser' (Bullseye) e 'chromium' (Bookworm/Trixie).
 . /etc/os-release 2>/dev/null || true
 CODENAME="${VERSION_CODENAME:-desconhecido}"
+MODELO_REAL="$(tr -d '\0' </proc/device-tree/model 2>/dev/null || echo desconhecido)"
 echo ">> SO detectado: $CODENAME"
+echo ">> Placa real:   $MODELO_REAL"
+
+# ============================================================================
+# PRE-FLIGHT — verifica TUDO antes de qualquer mudanca destrutiva.
+# ============================================================================
+# FATAIS abortam; AVISOS so logam e seguem. Acumula tudo e mostra um resumo
+# claro no fim, em vez de morrer no primeiro erro silencioso.
+_PRE_FAIL=0; _PRE_WARN=0; _PRE_LOG=""
+ck_fatal() { local t="$1" cmd="$2" m="$3"
+  if eval "$cmd" >/dev/null 2>&1; then printf "  \xE2\x9C\x93 %s\n" "$t"
+  else printf "  \xE2\x9C\x97 %s\n     -> %s\n" "$t" "$m"; _PRE_FAIL=$((_PRE_FAIL+1)); _PRE_LOG="${_PRE_LOG}FATAL: ${t} :: ${m}\n"; fi
+}
+ck_warn() { local t="$1" cmd="$2" m="$3"
+  if eval "$cmd" >/dev/null 2>&1; then printf "  \xE2\x9C\x93 %s\n" "$t"
+  else printf "  ! %s\n     -> %s\n" "$t" "$m"; _PRE_WARN=$((_PRE_WARN+1)); _PRE_LOG="${_PRE_LOG}AVISO: ${t}\n"; fi
+}
+
+echo ""
+echo ">>> Pre-flight: verificando ambiente antes de instalar..."
+echo ""
+echo " [Ambiente]"
+ck_fatal "Variaveis de instalacao definidas (SERVIDOR/DEVICE_ID/PLACA/MODELO)" \
+  "[ -n '$SERVIDOR' ] && [ -n '$DEVICE_ID' ] && [ -n '$PLACA' ] && [ -n '$MODELO_MAQUINA' ]" \
+  "Link de instalacao corrompido; regere o cadastro no painel."
+ck_fatal "PLACA selecionada e suportada (pi3|pi4|pi5)" \
+  "echo '$PLACA' | grep -qE '^(pi3|pi4|pi5)$'" \
+  "Cadastrou com placa invalida. Re-cadastre escolhendo pi3, pi4 ou pi5."
+ck_fatal "MODELO de equipamento e suportado" \
+  "echo '$MODELO_MAQUINA' | grep -qE '^(ESTATICA_1|ESTATICA_2|ESTATICA_LCD|DINAMICA_PI|DINAMICA_CLP)$'" \
+  "Tipo invalido. Re-cadastre escolhendo um dos tipos listados."
+ck_fatal "SO suportado (Bullseye / Bookworm / Trixie)" \
+  "echo '$CODENAME' | grep -qE '^(bullseye|bookworm|trixie)$'" \
+  "Versao do Raspberry Pi OS nao suportada ($CODENAME). Atualize o SO antes de instalar."
+ck_fatal "Usuario alvo existe e nao e root ($TARGET_USER)" \
+  "id '$TARGET_USER' >/dev/null && [ \"\$(id -u '$TARGET_USER')\" -ne 0 ]" \
+  "Crie o usuario 'pi' OU rode 'sudo -u <usuario> ...' (atual: $TARGET_USER)."
+ck_fatal "HOME do usuario alvo existe e e gravavel" \
+  "[ -d '$TARGET_HOME' ] && sudo -u '$TARGET_USER' test -w '$TARGET_HOME'" \
+  "$TARGET_HOME nao existe ou nao e gravavel pelo $TARGET_USER."
+ck_warn "Placa real bate com a escolhida no cadastro ($PLACA)" \
+  "echo '$MODELO_REAL' | grep -qiE '$( [ \"$PLACA\" = pi3 ] && echo \"Pi 3\" || ( [ \"$PLACA\" = pi4 ] && echo \"Pi 4\" || echo \"Pi 5\" ) )'" \
+  "Voce escolheu $PLACA, mas a placa real e '$MODELO_REAL'. Pode dar problema na escolha das libs GPIO."
+
+echo " [Tempo / TLS]"
+# Relogio errado quebra HTTPS e apt (cert futuro/passado).
+ck_fatal "Relogio do sistema com ano > 2024 (TLS quebra com data errada)" \
+  "[ \$(date +%Y) -gt 2024 ]" \
+  "Data do sistema errada. Rode 'sudo timedatectl set-ntp true' + aguarde 30s OU 'sudo date -s YYYY-MM-DD' manualmente."
+
+echo " [Rede e servidor]"
+ck_fatal "Tem rota de rede default (gateway)" \
+  "ip route show default | grep -q 'default via'" \
+  "Sem gateway. Conecte cabo Ethernet OU configure Wi-Fi (sudo raspi-config)."
+ck_fatal "DNS resolve cubadora.specialcore.com.br" \
+  "getent hosts cubadora.specialcore.com.br | head -1 | grep -qE '[0-9]+\\.[0-9]+'" \
+  "DNS falhou. Verifique /etc/resolv.conf, ou teste 'dig cubadora.specialcore.com.br @1.1.1.1'."
+ck_fatal "Painel responde em /api/versions (HTTP 200)" \
+  "[ \"\$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 10 --max-time 20 '$SERVIDOR/api/versions')\" = '200' ]" \
+  "Painel inalcancavel ($SERVIDOR/api/versions). Confirme que o servidor esta no ar e a rede do cliente libera HTTPS."
+ck_fatal "Pacote /api/package/latest disponivel (HTTP 200)" \
+  "[ \"\$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 10 --max-time 20 '$SERVIDOR/api/package/latest')\" = '200' ]" \
+  "Nenhuma versao publicada no painel. Publique uma versao (deploy/publish.py) antes de instalar."
+ck_warn "Porta 2222 do tunel reverso alcancavel" \
+  "timeout 5 bash -c '</dev/tcp/cubadora.specialcore.com.br/2222' 2>/dev/null" \
+  "Tunel reverso (autossh) nao vai conectar; suporte remoto fica indisponivel. Cliente precisa liberar TCP/2222."
+
+echo " [APT / pacotes]"
+ck_fatal "Sem lock no apt/dpkg (nenhum apt rodando agora)" \
+  "! fuser /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock >/dev/null 2>&1" \
+  "Outro apt-get/dpkg/unattended-upgrades esta rodando. Aguarde 1-2min e tente de novo (ou 'sudo killall apt apt-get')."
+ck_fatal "ca-certificates instalado (HTTPS funciona)" \
+  "dpkg-query -W -f='\${Status}\\n' ca-certificates 2>/dev/null | grep -q 'install ok installed'" \
+  "Sem ca-certificates, HTTPS falha. 'sudo apt-get install -y ca-certificates'."
+echo "   ... rodando 'apt-get update' para validar repos (pode levar 30s)"
+if ! apt-get update -y >/tmp/cubadora-aptupd.log 2>&1; then
+  echo "  \xE2\x9C\x97 apt-get update falhou"
+  echo "     -> Verifique /tmp/cubadora-aptupd.log; pode ser repo arquivado (Bullseye antigo) ou rede."
+  _PRE_FAIL=$((_PRE_FAIL+1)); _PRE_LOG="${_PRE_LOG}FATAL: apt-get update falhou\n"
+else echo "  \xE2\x9C\x93 apt-get update OK"; fi
+ck_fatal "Chromium disponivel (chromium-browser OU chromium)" \
+  "apt-cache show chromium-browser >/dev/null 2>&1 || apt-cache show chromium >/dev/null 2>&1" \
+  "Nenhum pacote do Chromium nos repos. Sem ele a tela do kiosk nao abre. Adicione repos da Raspberry Pi Foundation."
+for pkg in curl unzip python3 python3-pip openssh-client autossh; do
+  ck_fatal "Pacote essencial '$pkg' no apt" \
+    "apt-cache show $pkg >/dev/null 2>&1" \
+    "Pacote $pkg ausente nos repos. Sem ele a instalacao quebra."
+done
+
+# Dependencias Python por placa.
+if [ "$PLACA" = "pi3" ]; then
+  # Pi 3: lgpio nao costuma compilar (libgpiod muito antiga em Bullseye); usamos RPi.GPIO via apt.
+  ck_fatal "Pi 3: pacote python3-rpi.gpio disponivel" \
+    "apt-cache show python3-rpi.gpio >/dev/null 2>&1" \
+    "Sem python3-rpi.gpio. No Pi 3 e o backend GPIO recomendado."
+else
+  # Pi 4/5: vamos instalar lgpio do PyPI; precisamos do PyPI alcansavel + headers do gpiod.
+  ck_fatal "PyPI alcansavel (para instalar lgpio)" \
+    "[ \"\$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 8 --max-time 12 https://pypi.org/simple/lgpio/)\" = '200' ]" \
+    "PyPI inalcancavel. Sem ele lgpio (backend GPIO do Pi 4/5) nao instala."
+fi
+
+ck_fatal "Python >= 3.9" \
+  "python3 -c 'import sys; raise SystemExit(0 if sys.version_info[:2] >= (3,9) else 1)'" \
+  "Python muito antigo (precisa 3.9+). Atualize o Raspberry Pi OS."
+
+echo " [Disco]"
+ck_fatal "Disco livre em / >= 500 MB" \
+  "[ \$(df -m / | awk 'NR==2{print \$4}') -ge 500 ]" \
+  "Pouco espaco em /. Limpe arquivos antigos ('sudo apt-get autoremove; sudo apt-get clean')."
+ck_warn "Disco livre em /var >= 200 MB" \
+  "[ \$(df -m /var | awk 'NR==2{print \$4}') -ge 200 ]" \
+  "Cache apt pode estourar; limpe com 'sudo apt-get clean'."
+ck_fatal "Sistema de arquivos / montado read-write" \
+  "touch /tmp/.cubadora-rw-test && rm -f /tmp/.cubadora-rw-test" \
+  "/ esta read-only. Reinicie sem o card protegido."
+
+echo " [Conflitos com instalacao anterior]"
+ck_warn "Servico cubagempi.service nao esta segurando GPIO (sera parado se ativo)" \
+  "! systemctl is-active --quiet cubagempi" \
+  "Vou parar 'cubagempi' antes de continuar; instalacao previa estava rodando."
+# Para imediatamente pra liberar /dev/serial0 e GPIO12.
+systemctl stop cubagempi 2>/dev/null || true
+systemctl stop cubagempi-tunnel 2>/dev/null || true
+ck_warn "Porta 8080 (kiosk web) livre" \
+  "! fuser 8080/tcp >/dev/null 2>&1" \
+  "Algo segurando 8080; matarei processos cubagempi anteriores. Se persistir: 'sudo fuser -k 8080/tcp'."
+ck_warn "/dev/serial0 livre (sem processo segurando)" \
+  "[ ! -e /dev/serial0 ] || ! fuser /dev/serial0 >/dev/null 2>&1" \
+  "Processo ocupando a serial. Verifique 'sudo fuser /dev/serial0'."
+
+echo " [Sudoers/systemd]"
+ck_fatal "systemd ativo como PID 1" \
+  "[ \"\$(ps -o comm= -p 1)\" = 'systemd' ]" \
+  "systemd ausente; os servicos cubagempi nao vao subir."
+ck_fatal "visudo disponivel (valida sudoers)" \
+  "command -v visudo" \
+  "Sem visudo nao posso configurar sudoers; instale: 'sudo apt-get install -y sudo'."
+
+# ===== Resumo =====
+echo ""
+echo "==================================================================="
+if [ $_PRE_FAIL -gt 0 ]; then
+  echo " PRE-FLIGHT FALHOU: $_PRE_FAIL erros FATAIS, $_PRE_WARN avisos."
+  echo " Nada foi alterado. Resolva os itens FATAIS acima e tente de novo:"
+  echo "   curl -fsSL $SERVIDOR/install/$DEVICE_ID | sudo bash"
+  echo "==================================================================="
+  exit 2
+fi
+echo " PRE-FLIGHT OK: 0 erros, $_PRE_WARN avisos."
+echo " Prosseguindo com a instalacao..."
+echo "==================================================================="
+echo ""
 
 echo ">> Dependencias do sistema (curl, unzip, python3, autossh)..."
-apt-get update -y || true
 apt-get install -y curl unzip python3 python3-pip python3-yaml autossh openssh-client i2c-tools unclutter || true
 # Navegador do kiosk: pacote varia conforme SO/placa.
 if ! command -v chromium-browser >/dev/null 2>&1 && ! command -v chromium >/dev/null 2>&1; then
