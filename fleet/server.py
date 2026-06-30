@@ -206,7 +206,8 @@ async function cmdConfig(id){const sec=document.getElementById('cfgsec').value.t
 async function cmdConfigKiosk(id,on){await cmd(id,'config',{secao:'kiosk',dados:{modo_producao:on}})}
 async function limparHist(id){if(!confirm('Apagar TODO o histórico de avisos/erros deste equipamento?'))return;
  const r=await post('/api/events/clear',{device_id:id}); alert((r.removidos||0)+' eventos removidos'); detalhe(id)}
-async function removerEquip(id,nome){
+async function removerEquip(id){
+ const nome=((document.querySelector('#box h2')||{}).textContent||id).trim();
  if(!confirm('Remover '+(nome||id)+' da frota?\n\nIsso apaga PERMANENTEMENTE:\n- O equipamento\n- Todo o histórico de eventos\n- Todos os comandos\n- A chave do túnel SSH'))return;
  if(!confirm('Confirma de novo? Essa ação é IRREVERSÍVEL.'))return;
  const r=await (await fetch('/api/device/'+id+'/delete',{method:'POST'})).json();
@@ -265,7 +266,7 @@ async function detalhe(id){const d=await getj('/api/device/'+id);const dev=d.dev
   ${resumirEventos(ev)}
 
   <div style="margin-top:20px;padding-top:16px;border-top:1px solid #eee;display:flex;justify-content:space-between;align-items:center">
-   <button onclick="removerEquip('${id}', ${JSON.stringify(dev.nome||'')})" style="background:#fee2e2;color:#991b1b;font-size:13px;padding:8px 12px">🗑️ Remover equipamento</button>
+   <button onclick="removerEquip('${id}')" style="background:#fee2e2;color:#991b1b;font-size:13px;padding:8px 12px">🗑️ Remover equipamento</button>
    <button onclick="fecha()" style="background:#e2e8f0;color:#0f172a">Fechar</button>
   </div>`;
  document.getElementById('modal').style.display='flex';
@@ -802,10 +803,12 @@ def _make_handler(db: FleetDB):
         def log_message(self, *a):
             pass
 
-        def _send(self, code, body, ctype="application/json"):
+        def _send(self, code, body, ctype="application/json", cache=None):
             self.send_response(code)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
+            if cache:
+                self.send_header("Cache-Control", cache)
             self.end_headers()
             self.wfile.write(body)
 
@@ -933,7 +936,10 @@ def _make_handler(db: FleetDB):
             u = urlparse(self.path)
             p = u.path
             if p == "/" or p.startswith("/index"):
-                self._send(200, _PAGE.encode("utf-8"), "text/html; charset=utf-8")
+                # no-cache: o painel revalida sempre, evitando ficar preso em JS antigo
+                # (um bug ja corrigido "voltava" porque o navegador servia a pagina do cache).
+                self._send(200, _PAGE.encode("utf-8"), "text/html; charset=utf-8",
+                           cache="no-cache, must-revalidate")
             elif p.startswith("/assets/"):
                 # Assets estaticos (logo Vestra, etc.). Risco: NENHUM (so leitura de arquivo
                 # no diretorio assets/ embarcado na imagem; nada toca no SO do host).
