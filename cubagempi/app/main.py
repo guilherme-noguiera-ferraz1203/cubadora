@@ -29,16 +29,29 @@ def parse_args(argv=None) -> argparse.Namespace:
 def main(argv=None) -> int:
     args = parse_args(argv)
     setup_logging(logging.DEBUG if args.debug else logging.INFO)
-    cfg = load_config(args.config)
 
-    app = App(cfg, simulado=not args.real, db_path=args.db, config_path=args.config)
-    app.start()
+    from .. import __version__ as _versao
+    from ..boot_trace import iniciar_boot, marco, passo
+    iniciar_boot(_versao, "REAL (hardware)" if args.real else "SIMULADO")
+
+    with passo("1", "Carregando configuracao (config.yaml)"):
+        cfg = load_config(args.config)
+
+    with passo("2", "Montando aplicacao + hardware "
+                    "(balanca, RS-485, I2C, ATmega, sensores, LED)"):
+        app = App(cfg, simulado=not args.real, db_path=args.db, config_path=args.config)
+
+    with passo("3", "Iniciando servicos internos (workers, perifericos, agente de frota)"):
+        app.start()
 
     web = None
     if not args.no_web:
-        from ..web import WebServer
-        web = WebServer(app, cfg.web.porta)
-        web.start()
+        with passo("4", f"Subindo servidor web na porta {cfg.web.porta}"):
+            from ..web import WebServer
+            web = WebServer(app, cfg.web.porta)
+            web.start()
+
+    marco(f"PASSO 5 OK        | PRONTO -- backend no ar (tela em http://localhost:{cfg.web.porta})")
 
     if args.no_gui:
         log.info("Modo headless. Ctrl+C para sair.")
