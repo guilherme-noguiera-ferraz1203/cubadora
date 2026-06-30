@@ -45,6 +45,14 @@ CREATE TABLE IF NOT EXISTS command (
     enviado_em  TEXT,
     ack_em      TEXT
 );
+-- Lapide ("tombstone") de equipamentos removidos no painel. Enquanto o device_id
+-- estiver aqui, o upsert_device IGNORA heartbeats dele: sem isso, um Pi ainda ligado
+-- recriaria o registro no heartbeat seguinte (~7s) e o equipamento "voltaria" sozinho.
+-- Limpo quando o admin re-cadastra o equipamento de propósito (create_pending_device).
+CREATE TABLE IF NOT EXISTS deleted_device (
+    device_id  TEXT PRIMARY KEY,
+    deleted_at TEXT
+);
 """
 
 
@@ -83,6 +91,14 @@ class FleetDB:
         with self._lock:
             existe = self._conn.execute("SELECT device_id FROM device WHERE device_id=?",
                                         (p.get("device_id"),)).fetchone()
+            if not existe:
+                bloqueado = self._conn.execute(
+                    "SELECT 1 FROM deleted_device WHERE device_id=?",
+                    (p.get("device_id"),)).fetchone()
+                if bloqueado:
+                    # Removido no painel: nao recria. (O Pi pode estar ligado ainda batendo
+                    # heartbeat; ignoramos ate alguem re-cadastrar o equipamento.)
+                    return
             estado_in = p.get("estado")
             estado_str = json.dumps(estado_in) if estado_in else None
             if existe:
@@ -143,8 +159,26 @@ class FleetDB:
             n_dev = self._conn.execute("DELETE FROM device WHERE device_id=?", (device_id,)).rowcount
             n_evt = self._conn.execute("DELETE FROM event WHERE device_id=?", (device_id,)).rowcount
             n_cmd = self._conn.execute("DELETE FROM command WHERE device_id=?", (device_id,)).rowcount
+            # Lapide: impede que um Pi ainda ligado recrie o registro via heartbeat.
+            self._conn.execute(
+                "INSERT OR REPLACE INTO deleted_device (device_id, deleted_at) VALUES (?, ?)",
+                (device_id, datetime.now().isoformat()))
             self._conn.commit()
         return {"device": n_dev, "eventos": n_evt, "comandos": n_cmd}
+
+    def is_blocked(self, device_id: str) -> bool:
+        """True se o equipamento foi removido no painel (esta na lapide). Heartbeats de
+        devices bloqueados sao ignorados pelo upsert_device."""
+        with self._lock:
+            r = self._conn.execute("SELECT 1 FROM deleted_device WHERE device_id=?",
+                                   (device_id,)).fetchone()
+        return r is not None
+
+    def unblock_device(self, device_id: str) -> None:
+        """Tira o equipamento da lapide — usado ao re-cadastrar de propósito."""
+        with self._lock:
+            self._conn.execute("DELETE FROM deleted_device WHERE device_id=?", (device_id,))
+            self._conn.commit()
 
     def create_pending_device(self, device_id: str, nome: str, unidade: str,
                               placa: str = "", modelo_maquina: str = "") -> bool:
@@ -158,6 +192,8 @@ class FleetDB:
                                         (device_id,)).fetchone()
             if existe:
                 return False
+            # Re-cadastro intencional: tira da lapide para o device poder voltar a aparecer.
+            self._conn.execute("DELETE FROM deleted_device WHERE device_id=?", (device_id,))
             self._conn.execute(
                 "INSERT INTO device (device_id,nome,unidade,placa,modelo_maquina,primeiro_seen) "
                 "VALUES (?,?,?,?,?,?)",
