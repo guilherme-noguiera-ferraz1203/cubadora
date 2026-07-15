@@ -32,6 +32,10 @@ class ConfigRs485:
     millis_min_write_interval: int = 5
     de_pin_bcm: int = 12          # linha DE/RE do transceptor (Pi4j GPIO_26 = BCM 12)
     use_lib_pi485: bool = True
+    # Auto-direção: adaptadores USB-RS485 (FT232RL etc.) chaveiam TX/RX em HARDWARE — não há
+    # pino GPIO para controlar. Com auto_dir=True (ou de_pin_bcm <= 0) o software não toca o
+    # GPIO e não depende do gpiozero. Use junto com serial_port=/dev/ttyUSB0.
+    auto_dir: bool = False
 
 
 @dataclass

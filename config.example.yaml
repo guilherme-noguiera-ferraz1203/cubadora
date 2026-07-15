@@ -8,12 +8,16 @@ tema: escuro
 modo_teste: false
 totalizacao_peso: false
 rs485:
+  # UART onboard + shield (padrão de produção). Para adaptador USB-RS485 (FT232RL),
+  # troque para /dev/ttyUSB0 e ligue auto_dir: true — o adaptador chaveia TX/RX em
+  # hardware e o pino DE deixa de ser usado.
   serial_port: /dev/ttyAMA0
   baudrate: 115200
   timeout_ms: 50
   millis_min_write_interval: 5
   de_pin_bcm: 12
   use_lib_pi485: true
+  auto_dir: false
 sensor:
   enderecos:
   - 11

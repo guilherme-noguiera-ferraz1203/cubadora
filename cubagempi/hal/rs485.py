@@ -21,7 +21,7 @@ from abc import ABC, abstractmethod
 from typing import Callable, Optional
 
 from ..config.models import ConfigRs485
-from .gpio import OutputPin, create_output_pin
+from .gpio import MockOutputPin, OutputPin, create_output_pin
 
 log = logging.getLogger(__name__)
 
@@ -30,14 +30,34 @@ log = logging.getLogger(__name__)
 Responder = Callable[[bytes, int], Optional[bytes]]
 
 
+# Portas de adaptador USB-serial (FT232RL, CH340, CP210x...). Se a config aponta para uma
+# destas, a escolha é EXPLÍCITA do usuário — jamais cair para a UART onboard.
+_USB_PREFIXOS = ("/dev/ttyUSB", "/dev/ttyACM")
+
+
+def porta_e_usb(porta: str) -> bool:
+    return bool(porta) and porta.startswith(_USB_PREFIXOS)
+
+
 def resolver_porta_serial(preferida: str) -> str:
     """Escolhe a porta serial existente (lida com diferenças entre Pi 3/4/5 e SO).
 
     `/dev/serial0` é o symlink estável; cai para ttyAMA0/ttyS0 conforme o modelo.
+
+    O fallback vale SÓ para a UART onboard. Se a porta pedida for um adaptador USB e ela
+    não existir, isto é um ERRO — cair para a UART onboard (que sempre existe no Pi)
+    abriria o barramento errado em silêncio, e o equipamento pareceria apenas "mudo".
     """
-    candidatos = [preferida, "/dev/serial0", "/dev/ttyAMA0", "/dev/ttyS0", "/dev/ttyAMA10"]
-    for c in candidatos:
-        if c and os.path.exists(c):
+    if preferida and os.path.exists(preferida):
+        return preferida
+    if porta_e_usb(preferida):
+        raise FileNotFoundError(
+            f"Porta USB {preferida} não existe. Ligue o adaptador USB-serial (confira com "
+            f"'ls -l /dev/ttyUSB*') ou ajuste rs485.serial_port no config.yaml. Não vou usar "
+            f"a UART onboard no lugar: falaria no barramento errado sem avisar."
+        )
+    for c in ("/dev/serial0", "/dev/ttyAMA0", "/dev/ttyS0", "/dev/ttyAMA10"):
+        if os.path.exists(c):
             return c
     return preferida
 
@@ -73,7 +93,13 @@ class PiRs485(Rs485):
         self.min_write_interval_ms = config.millis_min_write_interval
         self._last_write_ms = 0.0
 
-        self._de: OutputPin = create_output_pin(config.de_pin_bcm, initial=False, real=real_gpio)
+        # Auto-direção: o adaptador USB-RS485 chaveia TX/RX sozinho, em hardware. Nesse caso
+        # não criamos pino GPIO nenhum (nem dependemos do gpiozero) — o DE vira no-op.
+        self.auto_dir = bool(getattr(config, "auto_dir", False)) or config.de_pin_bcm <= 0
+        if self.auto_dir:
+            self._de: OutputPin = MockOutputPin(config.de_pin_bcm)
+        else:
+            self._de = create_output_pin(config.de_pin_bcm, initial=False, real=real_gpio)
         self._ser = serial.Serial()
         self._ser.port = resolver_porta_serial(config.serial_port)
         if self._ser.port != config.serial_port:
@@ -90,8 +116,10 @@ class PiRs485(Rs485):
         self._ser.timeout = 0          # leitura não-bloqueante; controlamos o timeout manualmente
         self._ser.open()
         self.baudrate = baudrate
-        log.info("RS-485 aberto em %s @ %d 8N1 (DE=BCM%d)",
-                 self.config.serial_port, baudrate, self.config.de_pin_bcm)
+        # Loga a porta REALMENTE aberta (não a pedida) — some a confusão de "configurei USB
+        # mas está falando na UART".
+        log.info("RS-485 aberto em %s @ %d 8N1 (%s)", self._ser.port, baudrate,
+                 "auto-direção, sem DE" if self.auto_dir else f"DE=BCM{self.config.de_pin_bcm}")
 
     def close(self) -> None:
         try:
@@ -108,20 +136,23 @@ class PiRs485(Rs485):
         self._wait_min_interval()
         try:
             self._ser.reset_input_buffer()
-            self._de.high()                       # habilita transmissão
+            self._de.high()                       # habilita transmissão (no-op se auto_dir)
             time.sleep(0.001)
             self._ser.write(buffer)
             self._ser.flush()                     # garante envio físico
             # mantém DE alto o tempo de transmitir todos os bytes (10 bits/byte)
             micros = len(buffer) * 10_000.0 / self.baudrate
             time.sleep(micros / 1_000_000.0)
-            self._de.low()                        # volta a escutar
+            self._de.low()                        # volta a escutar ANTES de ler a resposta
             rx = self._wait_rx(length_rx)
             return rx
         except Exception:
             log.exception("Erro na escrita RS-485 (TX=%s)", list(buffer))
             return None
         finally:
+            # Se estourou entre high() e low(), o transceptor ficaria preso em TX e mataria o
+            # barramento até a próxima escrita. low() aqui é idempotente e garante o RX.
+            self._de.low()
             self._last_write_ms = time.monotonic() * 1000
 
     def _wait_rx(self, length_rx: int) -> Optional[bytes]:
