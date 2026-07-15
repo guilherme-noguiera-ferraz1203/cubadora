@@ -9,8 +9,13 @@ modo_teste: false
 totalizacao_peso: false
 rs485:
   # UART onboard + shield (padrão de produção). Para adaptador USB-RS485 (FT232RL),
-  # troque para /dev/ttyUSB0 e ligue auto_dir: true — o adaptador chaveia TX/RX em
-  # hardware e o pino DE deixa de ser usado.
+  # troque a porta e ligue auto_dir: true — o adaptador chaveia TX/RX em hardware e
+  # o pino DE deixa de ser usado.
+  #
+  # FIXAÇÃO: /dev/ttyUSB0 é por ordem de enumeração — com 2 adaptadores plugados eles
+  # trocam de nome entre boots. Prefira uma identidade estável (rode: diag_serial.py --fixar):
+  #   serial_port: /dev/serial/by-id/usb-FTDI_FT232R_USB_UART_A50285BI-if00-port0
+  #   serial_port: FT232R        <- fragmento: casa por chip/série/produto
   serial_port: /dev/ttyAMA0
   baudrate: 115200
   timeout_ms: 50
@@ -135,7 +140,14 @@ login:
   minutes_autologout: 10
   usuarios: {}
 leitor:
+  # NENHUM (default = leitor DESLIGADO) | SERIAL | USB | I2C | VMS
+  #   SERIAL/USB : scanner em modo serial/USB-CDC. USB é apelido de SERIAL — NÃO lê
+  #                teclado. Scanner "keyboard-wedge" (digita como teclado) não funciona:
+  #                troque-o para modo USB-COM/CDC pelo código de barras do manual dele.
+  #   I2C        : leitor atrás do ATmega (device 21) — o caminho nas máquinas com shield.
   modelo: NENHUM
+  # Mesma fixação do rs485: prefira /dev/serial/by-id/... ou um fragmento ("CH340").
+  # Atenção: este default é o MESMO do rs485.serial_port — com os dois em USB, brigam.
   com_port: /dev/ttyUSB0
   baudrate: 9600
   i2c_serial_device: 21

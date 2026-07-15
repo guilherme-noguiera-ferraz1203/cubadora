@@ -21,6 +21,7 @@ from abc import ABC, abstractmethod
 from typing import Callable, Optional
 
 from ..config.models import ConfigRs485
+from . import serial_ports
 from .gpio import MockOutputPin, OutputPin, create_output_pin
 
 log = logging.getLogger(__name__)
@@ -30,32 +31,30 @@ log = logging.getLogger(__name__)
 Responder = Callable[[bytes, int], Optional[bytes]]
 
 
-# Portas de adaptador USB-serial (FT232RL, CH340, CP210x...). Se a config aponta para uma
-# destas, a escolha é EXPLÍCITA do usuário — jamais cair para a UART onboard.
-_USB_PREFIXOS = ("/dev/ttyUSB", "/dev/ttyACM")
-
-
 def porta_e_usb(porta: str) -> bool:
-    return bool(porta) and porta.startswith(_USB_PREFIXOS)
+    return serial_ports.e_usb(porta)
 
 
 def resolver_porta_serial(preferida: str) -> str:
-    """Escolhe a porta serial existente (lida com diferenças entre Pi 3/4/5 e SO).
+    """Escolhe a porta serial (lida com diferenças entre Pi 3/4/5 e SO).
 
-    `/dev/serial0` é o symlink estável; cai para ttyAMA0/ttyS0 conforme o modelo.
+    Dois mundos, tratados de forma diferente de propósito:
 
-    O fallback vale SÓ para a UART onboard. Se a porta pedida for um adaptador USB e ela
-    não existir, isto é um ERRO — cair para a UART onboard (que sempre existe no Pi)
-    abriria o barramento errado em silêncio, e o equipamento pareceria apenas "mudo".
+    - UART ONBOARD (/dev/ttyAMA0, /dev/serial0, ...): mantém o fallback histórico entre os
+      nomes da família, porque eles variam por modelo de Pi e por SO.
+    - USB (nó cru, link estável ou fragmento): resolve pela identidade estável (fixação) e
+      ERRA ALTO se não achar. Cair para a UART onboard aqui seria um desastre silencioso —
+      ela SEMPRE existe no Pi, então abriríamos o barramento errado e o equipamento só
+      pareceria "mudo".
     """
+    if serial_ports.e_identidade_usb(preferida):
+        real, porta = serial_ports.resolver_porta(preferida)
+        serial_ports.aviso_se_instavel("RS-485", preferida, porta)
+        if porta is not None and preferida != porta.estavel:
+            log.info("RS-485 fixado: %s -> %s (%s)", preferida, real, porta.descricao())
+        return real
     if preferida and os.path.exists(preferida):
         return preferida
-    if porta_e_usb(preferida):
-        raise FileNotFoundError(
-            f"Porta USB {preferida} não existe. Ligue o adaptador USB-serial (confira com "
-            f"'ls -l /dev/ttyUSB*') ou ajuste rs485.serial_port no config.yaml. Não vou usar "
-            f"a UART onboard no lugar: falaria no barramento errado sem avisar."
-        )
     for c in ("/dev/serial0", "/dev/ttyAMA0", "/dev/ttyS0", "/dev/ttyAMA10"):
         if os.path.exists(c):
             return c

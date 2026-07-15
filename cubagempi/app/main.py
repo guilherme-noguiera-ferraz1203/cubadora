@@ -37,6 +37,13 @@ def main(argv=None) -> int:
     with passo("1", "Carregando configuracao (config.yaml)"):
         cfg = load_config(args.config)
 
+    # Fixacao das portas USB-serial: /dev/ttyUSB0 e atribuido por ordem de enumeracao,
+    # entao RS-485 e leitor trocam de nome entre boots. Logamos a identidade estavel de
+    # cada adaptador a cada boot — e dizemos como fixar quando a config usa um no cru.
+    with passo("1.5", "Fixando portas seriais USB (identidade estavel)"):
+        from ..hal.serial_ports import log_fixacao
+        log_fixacao()
+
     with passo("2", "Montando aplicacao + hardware "
                     "(balanca, RS-485, I2C, ATmega, sensores, LED)"):
         app = App(cfg, simulado=not args.real, db_path=args.db, config_path=args.config)

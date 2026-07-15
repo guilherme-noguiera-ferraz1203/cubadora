@@ -76,6 +76,51 @@ def listar() -> int:
         print(f"  {porta:16} {tipo}{alvo}")
     print("\nDica: o adaptador USB aparece como /dev/ttyUSB0 (FT232RL/CH340).")
     print("Se aparecer só a UART onboard, o adaptador não foi reconhecido.")
+    print("Rode --fixar para ver a identidade estável de cada um.")
+    return 0
+
+
+def fixar() -> int:
+    """Mostra a identidade estável de cada adaptador + as linhas prontas p/ o config.yaml."""
+    from cubagempi.hal.serial_ports import listar_portas_usb
+
+    portas = listar_portas_usb()
+    if not portas:
+        print("Nenhum adaptador USB-serial conectado.")
+        print("Plugue o adaptador e rode de novo ('lsusb' para conferir).")
+        return 1
+
+    print(f"{len(portas)} adaptador(es) USB-serial:\n")
+    for p in portas:
+        print(f"  {p.device}")
+        print(f"    {p.descricao()}")
+        if p.by_id:
+            print(f"    fixo por SÉRIE   : {p.by_id}")
+        if p.by_path:
+            marca = "" if p.by_id else "   <-- use este (chip sem número de série)"
+            print(f"    fixo por CONECTOR: {p.by_path}{marca}")
+        if not p.by_id and not p.by_path:
+            print("    *** SEM caminho estável — o udev não criou symlink.")
+        print()
+
+    print("=" * 72)
+    print("COLE NO config.yaml (identidade estável, imune à ordem de enumeração):")
+    print("=" * 72)
+    ft = [p for p in portas if (p.produto or "").upper().find("FT232") >= 0
+          or (p.by_id or "").upper().find("FT232") >= 0]
+    alvo_rs485 = ft[0] if ft else portas[0]
+    print("\nrs485:")
+    print(f"  serial_port: {alvo_rs485.estavel}")
+    print("  auto_dir: true")
+    print("  baudrate: 115200")
+    if len(portas) > 1:
+        outros = [p for p in portas if p is not alvo_rs485]
+        print("\nleitor:")
+        print("  modelo: SERIAL")
+        print(f"  com_port: {outros[0].estavel}")
+        print("  baudrate: 9600")
+    if not ft and len(portas) > 1:
+        print("\n! Não identifiquei qual é o RS-485 pelo chip — confira antes de colar.")
     return 0
 
 
@@ -268,6 +313,8 @@ def main(argv=None) -> int:
         description="Diagnóstico de bancada dos periféricos por serial USB (sem o shield).",
         formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__)
     ap.add_argument("--listar", action="store_true", help="lista as portas seriais disponíveis")
+    ap.add_argument("--fixar", action="store_true",
+                    help="mostra a identidade estável de cada adaptador + linhas p/ o config.yaml")
     ap.add_argument("--sniff", metavar="PORTA", help="escuta a porta e identifica o protocolo da balança")
     ap.add_argument("--ultra", metavar="PORTA", help="consulta sensor ultrassônico via RS-485")
     ap.add_argument("--baud", type=int, help="baudrate (balança: 9600 | ultrassônico: 115200)")
@@ -286,6 +333,8 @@ def main(argv=None) -> int:
 
     if args.listar:
         return listar()
+    if args.fixar:
+        return fixar()
     if args.sniff:
         return sniff(args.sniff, args.baud, args.segundos, args.auto_baud)
     if args.ultra:

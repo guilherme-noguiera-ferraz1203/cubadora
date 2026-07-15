@@ -1,11 +1,18 @@
 """Leitor de código de barras / etiqueta (porta de Sick/VMS/EtiquetaSerialListener).
 
 Modelos suportados (config.leitor.modelo):
-- USB    : scanner keyboard-wedge (digita + Enter) — lido via stdin/evdev no Pi
-- SERIAL : scanner RS-232 (linhas terminadas em CR/LF) via pyserial
-- I2C    : leitor atrás do ATmega (lê o device serial via I²C)
+- SERIAL : scanner serial / USB-CDC (linhas terminadas em CR/LF) via pyserial
+- USB    : APELIDO de SERIAL — abre `com_port` com pyserial, igual ao SERIAL.
+           ATENÇÃO: NÃO lê teclado/HID. Um scanner "keyboard-wedge" (o tipo mais
+           comum, que digita como teclado e aparece em /dev/input/eventX) NÃO
+           funciona aqui: ele nem tem /dev/ttyUSB*. Para usá-lo, troque o scanner
+           para modo USB-COM/CDC — quase todo modelo tem um código de barras de
+           configuração no manual para isso — e aí ele vira /dev/ttyACM0.
+- I2C    : leitor atrás do ATmega (lê o device serial via I²C). É o caminho de
+           projeto nas máquinas com shield (device 21).
 - VMS    : variante serial (mesmo mecanismo do SERIAL)
-- NENHUM : desabilitado (ou Mock no PC)
+- NENHUM : desabilitado — É O DEFAULT, e o instalador não mexe nesta seção.
+           Instalação nova sai com o leitor DESLIGADO até alguém configurar.
 
 Cada leitor roda numa thread e chama `callback(codigo)` a cada leitura.
 """
@@ -62,7 +69,18 @@ class SerialBarcode(LeitorEtiqueta):
         super().__init__(callback)
         import serial  # import tardio
 
-        self._ser = serial.Serial(com_port, baudrate, timeout=0.5)
+        from ..hal import serial_ports
+
+        # Fixação: aceita nó cru, caminho estável (by-id/by-path) ou fragmento ("CH340").
+        # Sem isto o leitor abriria /dev/ttyUSB0 às cegas — que pode ser o adaptador
+        # RS-485 dos sensores, já que os dois têm o mesmo default de porta.
+        porta = com_port
+        if serial_ports.e_identidade_usb(com_port):
+            porta, info = serial_ports.resolver_porta(com_port)
+            serial_ports.aviso_se_instavel("Leitor", com_port, info)
+            if info is not None:
+                log.info("Leitor fixado: %s -> %s (%s)", com_port, porta, info.descricao())
+        self._ser = serial.Serial(porta, baudrate, timeout=0.5)
 
     def _loop(self) -> None:
         buf = bytearray()
